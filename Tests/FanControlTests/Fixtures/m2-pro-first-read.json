@@ -1,0 +1,130 @@
+{
+  "capabilities" : {
+    "fans" : [
+      {
+        "id" : 0,
+        "maximumRPM" : 6800,
+        "minimumRPM" : 2317,
+        "modeKey" : "F0Md",
+        "targetEncoding" : "flt "
+      },
+      {
+        "id" : 1,
+        "maximumRPM" : 6800,
+        "minimumRPM" : 2317,
+        "modeKey" : "F1Md",
+        "targetEncoding" : "flt "
+      }
+    ],
+    "hasGlobalUnlock" : false,
+    "model" : "Mac14,9",
+    "sensors" : [
+      {
+        "encoding" : "flt ",
+        "group" : "efficiency",
+        "key" : "Tp1h"
+      },
+      {
+        "encoding" : "flt ",
+        "group" : "efficiency",
+        "key" : "Tp1t"
+      },
+      {
+        "encoding" : "flt ",
+        "group" : "efficiency",
+        "key" : "Tp1p"
+      },
+      {
+        "encoding" : "flt ",
+        "group" : "efficiency",
+        "key" : "Tp1l"
+      },
+      {
+        "encoding" : "flt ",
+        "group" : "performance",
+        "key" : "Tp01"
+      },
+      {
+        "encoding" : "flt ",
+        "group" : "performance",
+        "key" : "Tp05"
+      },
+      {
+        "encoding" : "flt ",
+        "group" : "performance",
+        "key" : "Tp09"
+      },
+      {
+        "encoding" : "flt ",
+        "group" : "performance",
+        "key" : "Tp0D"
+      },
+      {
+        "encoding" : "flt ",
+        "group" : "performance",
+        "key" : "Tp0X"
+      },
+      {
+        "encoding" : "flt ",
+        "group" : "performance",
+        "key" : "Tp0b"
+      },
+      {
+        "encoding" : "flt ",
+        "group" : "performance",
+        "key" : "Tp0f"
+      },
+      {
+        "encoding" : "flt ",
+        "group" : "performance",
+        "key" : "Tp0j"
+      },
+      {
+        "encoding" : "flt ",
+        "group" : "gpu",
+        "key" : "Tg0f"
+      },
+      {
+        "encoding" : "flt ",
+        "group" : "gpu",
+        "key" : "Tg0j"
+      }
+    ]
+  },
+  "captured" : "2026-10-08T11:44:18Z",
+  "os" : "Version 26.6.2 (Build 25G83)",
+  "snapshot" : {
+    "capturedAt" : 29772.740679375,
+    "fans" : [
+      {
+        "actualRPM" : 2299.6142578125,
+        "id" : 0,
+        "mode" : 1,
+        "targetRPM" : 2317
+      },
+      {
+        "actualRPM" : 2305.2392578125,
+        "id" : 1,
+        "mode" : 1,
+        "targetRPM" : 2317
+      }
+    ],
+    "temperatures" : {
+      "Tg0f" : 47.90152359008789,
+      "Tg0j" : 48.093910217285156,
+      "Tp01" : 6.699999809265137,
+      "Tp05" : 4.632999897003174,
+      "Tp09" : 6.699999809265137,
+      "Tp0D" : 4.632999897003174,
+      "Tp0X" : 6.699999809265137,
+      "Tp0b" : 4.632999897003174,
+      "Tp0f" : 6.699999809265137,
+      "Tp0j" : 4.632999897003174,
+      "Tp1h" : 6.699999809265137,
+      "Tp1l" : 4.632999897003174,
+      "Tp1p" : 6.699999809265137,
+      "Tp1t" : 4.632999897003174
+    },
+    "thermalPressure" : 0
+  }
+}
