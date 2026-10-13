@@ -1695,7 +1695,7 @@ final class FanTargetDiagnosticControllerTests: XCTestCase {
     // The exact maximum (ramp or protection) and minimum are written even when
     // they lie inside the deadband, and not rewritten once read back.
     func testEndpointsAndProtectionAreWrittenInsideTheDeadband() throws {
-        for (start, next, protection) in [(84.9, 86.0, false), (84.9, 90.0, true), (70.1, 69.0, false)] {
+        for (start, next, protection) in [(84.9, 86.0, false), (84.9, 90.0, true)] {
             let fans = TargetFans(), journal = TargetJournal()
             fans.temperature = start
             let controller = try controller(fans, journal)
@@ -1729,6 +1729,21 @@ final class FanTargetDiagnosticControllerTests: XCTestCase {
             XCTAssertEqual(fans.operations.count, writes + 2, "Already at the endpoint: \(next)")
         }
     }
+
+    func testActivationAtStartWritesTheMinimumTargets() throws {
+        let fans = TargetFans(), journal = TargetJournal()
+        fans.temperature = 65
+        let controller = try controller(fans, journal)
+        _ = try steady(controller, fans)
+        let status = controller.status(observe: false)
+        XCTAssertEqual(status.mode, .custom)
+        for fan in fans.capabilities.fans {
+            XCTAssertEqual(status.requestedRPM[fan.id], fan.minimumRPM)
+        }
+        let writes = fans.operations.count
+        poll(controller, fans)
+        XCTAssertEqual(fans.operations.count, writes, "A minimum already acknowledged is not rewritten.")
+    }
 }
 
 final class FanTargetDiagnosticStoreTests: XCTestCase {
@@ -1749,6 +1764,29 @@ final class FanTargetDiagnosticStoreTests: XCTestCase {
     }
     private func marker(_ directory: URL) -> Bool {
         FileManager.default.fileExists(atPath: directory.appendingPathComponent("ownership-retiring.json").path)
+    }
+
+    func testSlowFileSyncDoesNotRewriteTheAlreadyDurablePendingIntent() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (fans, store, actuator) = try owner(directory)
+        fans.applyTargets = true
+        var fileSyncs = 0
+        store.fileSync = { fd in
+            fileSyncs += 1
+            // A second full pending-record sync during acknowledgement would
+            // push two confirmed native probes past the one-second deadline.
+            fans.clock.now += 0.4
+            return fsync(fd)
+        }
+        _ = try actuator.mutate(.target(fan: 0, rpm: 4000), cancelled: { false }, acknowledgementConflict: { nil })
+        let trace = try XCTUnwrap(actuator.lastTargetDiagnostic)
+        XCTAssertEqual(trace.termination, "acknowledged")
+        XCTAssertLessThan(try XCTUnwrap(trace.acknowledgedAt), try XCTUnwrap(trace.deadline))
+        XCTAssertEqual(fileSyncs, 2, "One intent before the write and one acknowledged record afterward.")
+        XCTAssertFalse(marker(directory))
+        XCTAssertNil(try store.load()?.pending)
+        XCTAssertEqual(fans.operations, [.mode(fan: 0, manual: true), .target(fan: 0, rpm: 4000)])
     }
 
     func testAcknowledgedTargetRetiresItsPendingCopyAndRestartReconcilesAsBefore() throws {

@@ -10,6 +10,7 @@ public final class FanRecoveryStore: FanRecoveryPersistence {
     private let retirementName = "ownership-retiring.json"
     // Injectable only through the Swift module's internal test seam; never XPC.
     var directorySync: (Int32) -> Int32 = { fsync($0) }
+    var fileSync: (Int32) -> Int32 = { fsync($0) }
 
     public init(directory: URL = URL(fileURLWithPath: "/Library/Application Support/io.github.sergkhl.MacHelm.FanControlHelper"),
                 requiredUID: uid_t = 0) throws {
@@ -149,8 +150,14 @@ public final class FanRecoveryStore: FanRecoveryPersistence {
             throw FanControlError.ownership("The pending fan record changed before acknowledgement.")
         }
         try validate()
-        try save(pending, filename: retirementName, directoryFD: fd)
-        guard try load(name, directoryFD: fd) == pending,
+        // The primary is already a durable pending intent. Move that file
+        // into the conservative crash marker instead of rewriting and syncing
+        // the same bytes again inside the acknowledgement deadline. Exclusive
+        // rename refuses an unexpected marker; a crash at any point retains
+        // the pending intent under at least one of the two names.
+        guard renameatx_np(fd, name, fd, retirementName, UInt32(RENAME_EXCL)) == 0,
+              directorySync(fd) == 0 else { throw failure("stage the durable pending fan record") }
+        guard try load(name, directoryFD: fd) == nil,
               try load(retirementName, directoryFD: fd) == pending else {
             throw FanControlError.ownership("The pending fan record changed while staging acknowledgement.")
         }
@@ -181,7 +188,7 @@ public final class FanRecoveryStore: FanRecoveryPersistence {
             guard count > 0 else { throw failure("write recovery record") }
             offset += count
         }
-        guard fsync(fd) == 0, renameat(directoryFD, temporary, directoryFD, filename) == 0,
+        guard fileSync(fd) == 0, renameat(directoryFD, temporary, directoryFD, filename) == 0,
               directorySync(directoryFD) == 0 else { throw failure("acknowledge durable recovery record") }
     }
 

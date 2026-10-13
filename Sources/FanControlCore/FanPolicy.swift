@@ -86,11 +86,9 @@ public struct FanPolicy {
                                reason: triggers.isEmpty ? "Waiting for ten seconds of cool CPU/GPU and nominal/fair pressure." : triggers.joined(separator: "; "))
         }
         let temperature = smoothedCPU ?? average
-        if customEntered && temperature <= profile.start - 5 {
-            customEntered = false
-        } else if !customEntered && temperature >= profile.start {
-            customEntered = true
-        }
+        // Smoothing governs the threshold as well as the ramp. Below it the
+        // enabled policy observes only; an existing override is released once.
+        customEntered = temperature >= profile.start
         guard customEntered else {
             previousDemand = nil
             return FanDecision(demand: nil, protection: false, reason: nil)

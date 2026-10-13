@@ -114,6 +114,42 @@ final class FanRuntimeTests: XCTestCase {
         controller.poll { done.fulfill() }
         wait(for: [done], timeout: 2)
     }
+
+    func testEnabledBelowStartObservesWithoutWritesAndReleasesAnOverrideOnlyOnce() throws {
+        let clock = TestClock(), fans = FakeFans(clock: clock), journal = MemoryJournal()
+        fans.temperature = 60
+        let controller = try controller(fans, journal: journal)
+        let session = try XCTUnwrap(begin(controller).sessionID)
+        for _ in 0..<3 {
+            clock.now += 1
+            XCTAssertTrue(controller.renew(owner: "owner", session: session))
+            poll(controller)
+        }
+        XCTAssertTrue(fans.operations.isEmpty, "Enabling below start must not reset or command automatic fans.")
+        fans.temperature = 75
+        for _ in 0..<10 {
+            clock.now += 1
+            XCTAssertTrue(controller.renew(owner: "owner", session: session))
+            poll(controller)
+        }
+        XCTAssertEqual(controller.status(observe: false).mode, .custom)
+        fans.temperature = 60
+        for _ in 0..<15 {
+            clock.now += 1
+            XCTAssertTrue(controller.renew(owner: "owner", session: session))
+            poll(controller)
+        }
+        let afterRelease = fans.operations.count
+        XCTAssertEqual(controller.status(observe: false).mode, .automatic)
+        XCTAssertTrue(fans.observation.isFullyAutomatic)
+        XCTAssertNil(journal.record)
+        for _ in 0..<3 {
+            clock.now += 1
+            XCTAssertTrue(controller.renew(owner: "owner", session: session))
+            poll(controller)
+        }
+        XCTAssertEqual(fans.operations.count, afterRelease, "An enabled cool policy must not keep resetting the fans.")
+    }
     private static let appStop = "Fan Control was turned off by the app."
     private func stop(_ controller: FanHelperController, owner: String = "owner") -> FanStatus {
         let done = expectation(description: "stop")
@@ -342,7 +378,7 @@ final class FanRuntimeTests: XCTestCase {
 
     func testPartialWriteFailureHoldsJournalAndDisarmsAllFurtherWrites() throws {
         let hardware = FakeFans(clock: TestClock()), journal = MemoryJournal()
-        hardware.failOperation = .target(fan: 1, rpm: 1500 + 4000 / 3)
+        hardware.failOperation = .target(fan: 1, rpm: 3500)
         let controller = try controller(hardware, journal: journal)
         let result = begin(controller)
         XCTAssertNil(result.sessionID)
@@ -1096,7 +1132,7 @@ final class FanRuntimeTests: XCTestCase {
         let controller = try controller(hardware, journal: journal)
         let started = begin(controller)
         let session = try XCTUnwrap(started.sessionID)
-        let ramp = FanPolicyTests.capabilities.fans.map { $0.target(demand: 1.0 / 3) }
+        let ramp = FanPolicyTests.capabilities.fans.map { $0.target(demand: 0.5) }
         func tick(_ time: Double, invalid: Bool = false) -> FanStatus {
             hardware.invalidMaximumReads = invalid ? 1 : 0; hardware.clock.now = time
             XCTAssertTrue(controller.renew(owner: "owner", session: session))

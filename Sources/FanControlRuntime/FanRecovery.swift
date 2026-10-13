@@ -89,6 +89,22 @@ public struct FanRecoveryRecord: Codable, Equatable {
         } == true
     }
 
+    // A manual-mode write does not choose a target. Firmware can advance its
+    // automatic target between the pre-write read and the mode taking effect.
+    // Admit that entry target only for the fan whose automatic mode we are
+    // changing; every other owned fan and the global unlock must still match.
+    fileprivate func matchesManualEntry(_ observation: FanControlObservation) -> Bool {
+        guard case .mode(let id, true) = pending,
+              acknowledged.fans.first(where: { $0.id == id })?.isAutomatic == true,
+              let fan = capabilities.fans.first(where: { $0.id == id }),
+              let observed = observation.fans.first(where: { $0.id == id }),
+              observed.mode == 1, observed.targetRPM.isFinite,
+              (fan.minimumRPM...fan.maximumRPM).contains(observed.targetRPM) else { return false }
+        var expected = Self.predict(.mode(fan: id, manual: true), from: acknowledged)
+        expected.fans[expected.fans.firstIndex(where: { $0.id == id })!].targetRPM = observed.targetRPM
+        return Self.matches(expected, observation)
+    }
+
     static func matches(_ expected: FanControlObservation, _ observed: FanControlObservation) -> Bool {
         guard expected.globalUnlock == observed.globalUnlock, expected.fans.count == observed.fans.count else { return false }
         return expected.fans.allSatisfy { fan in
@@ -157,7 +173,8 @@ public struct FanRecoveryRecord: Codable, Equatable {
                 && (capabilities.hasGlobalUnlock ? [0, 1].contains(state.globalUnlock ?? -1) : state.globalUnlock == nil)
         }
         return valid(pendingRecord.acknowledged) && valid(acknowledged)
-            && Self.matches(Self.predict(operation, from: pendingRecord.acknowledged), acknowledged)
+            && (Self.matches(Self.predict(operation, from: pendingRecord.acknowledged), acknowledged)
+                || pendingRecord.matchesManualEntry(acknowledged))
     }
 }
 
@@ -372,7 +389,8 @@ public final class FanActuator {
 
     private func diagnosticProbe(_ operation: FanOperation, record: FanRecoveryRecord,
                                  index: Int, startedAt: TimeInterval?, returnedAt: TimeInterval?,
-                                 probe: FanFanProbe?, error: String? = nil) -> FanDiagnosticProbe {
+                                 probe: FanFanProbe?, error: String? = nil,
+                                 manualEntry: Bool = false) -> FanDiagnosticProbe {
         let observation = probe?.observation
         let valid = observation.map { validDiagnosticObservation($0, record: record,
             startedAt: startedAt, returnedAt: returnedAt) } == true
@@ -385,7 +403,9 @@ public final class FanActuator {
             observation: valid ? observation : nil,
             error: error ?? (valid ? nil : "Invalid native diagnostic observation: \(String(describing: observation))"),
             operationConfirmed: confirmed,
-            ownershipMatches: valid && observation.map { record.matches($0) } == true,
+            ownershipMatches: valid && observation.map {
+                record.matches($0) || (manualEntry && record.matchesManualEntry($0))
+            } == true,
             model: probe?.model, fanMetadata: probe?.fans)
     }
 
@@ -497,6 +517,7 @@ public final class FanActuator {
         manualModePending()
         var consecutive = 0
         var previousCapture: TimeInterval?
+        var previousMatch: FanControlObservation?
         var accepted: FanControlObservation?
         var probeCalls = 8 + pending.capabilities.fans.count * 20
         var probeDuration: TimeInterval = 0
@@ -535,7 +556,7 @@ public final class FanActuator {
             do {
                 let native = try hardware.probeFans(pending.capabilities, cancelled: { stopReason() != nil })
                 let probe = diagnosticProbe(operation, record: pending, index: index,
-                    startedAt: startedAt, returnedAt: instant(timing), probe: native)
+                    startedAt: startedAt, returnedAt: instant(timing), probe: native, manualEntry: true)
                 diagnostic.probes.append(probe)
                 probeCalls = capacityBefore - hardware.commandDiagnosticCapacityRemaining
                 if !probe.operationConfirmed && diagnostic.firstMismatchAt == nil {
@@ -551,7 +572,15 @@ public final class FanActuator {
                 previousCapture = native.observation.capturedAt
                 if competingUtility() != nil { diagnostic.termination = "conflictingUtility"; break }
                 if let begin = boundaryStartedAt, let end = instant(timing) { probeDuration = max(0, end - begin) }
-                consecutive = probe.operationConfirmed ? consecutive + 1 : 0
+                if probe.operationConfirmed {
+                    // The firmware-selected entry target must agree in two
+                    // distinct probes before it becomes our owned baseline.
+                    consecutive = previousMatch.map { FanRecoveryRecord.matches($0, native.observation) } == true
+                        ? consecutive + 1 : 1
+                    previousMatch = native.observation
+                } else {
+                    consecutive = 0; previousMatch = nil
+                }
                 if consecutive == 2 {
                     accepted = native.observation; diagnostic.termination = "probesConfirmed"; break
                 }

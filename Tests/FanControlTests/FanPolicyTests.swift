@@ -32,8 +32,9 @@ final class FanPolicyTests: XCTestCase {
                         FanProfile(start: 70, maximum: 79), FanProfile(start: .nan, maximum: 85)] {
             XCTAssertThrowsError(try profile.validate())
         }
-        XCTAssertEqual(FanProfile.standard.demand(at: 75), 1.0 / 3, accuracy: 0.00001)
-        XCTAssertEqual(FanProfile.standard.demand(at: 80), 2.0 / 3, accuracy: 0.00001)
+        XCTAssertEqual(FanProfile.standard.start, 65)
+        XCTAssertEqual(FanProfile.standard.demand(at: 75), 0.5, accuracy: 0.00001)
+        XCTAssertEqual(FanProfile.standard.demand(at: 80), 0.75, accuracy: 0.00001)
     }
 
     func testFirmwareAverageAloneDrivesOrdinaryRamp() throws {
@@ -43,7 +44,7 @@ final class FanPolicyTests: XCTestCase {
         var policy = FanPolicy()
         let output = try policy.evaluate(frame, capabilities: Self.capabilities, profile: .standard, now: 0)
         XCTAssertFalse(output.protection)
-        XCTAssertEqual(try XCTUnwrap(output.demand), 1.0 / 3, accuracy: 0.00001)
+        XCTAssertEqual(try XCTUnwrap(output.demand), 0.5, accuracy: 0.00001)
         XCTAssertEqual(policy.smoothedCPU, 75)
 
         var coolPolicy = FanPolicy()
@@ -53,16 +54,19 @@ final class FanPolicyTests: XCTestCase {
         XCTAssertFalse(cool.protection)
     }
 
-    func testHysteresisAndEditedCurve() throws {
+    func testStartThresholdAndEditedCurve() throws {
         var policy = FanPolicy()
-        XCTAssertNil(try policy.evaluate(Self.frame(69), capabilities: Self.capabilities, profile: .standard, now: 0).demand)
+        XCTAssertNil(try policy.evaluate(Self.frame(64), capabilities: Self.capabilities, profile: .standard, now: 0).demand)
         let entered = try policy.evaluate(Self.frame(75, at: 5), capabilities: Self.capabilities, profile: .standard, now: 5)
         XCTAssertNotNil(entered.demand)
-        // Long elapsed samples establish the steady-state hysteresis boundaries.
+        // Long elapsed samples establish the smoothed threshold boundaries.
         _ = try policy.evaluate(Self.frame(67, at: 50), capabilities: Self.capabilities, profile: .standard, now: 50)
         XCTAssertTrue(policy.customEntered)
         XCTAssertNil(try policy.evaluate(Self.frame(64, at: 100), capabilities: Self.capabilities, profile: .standard, now: 100).demand)
         XCTAssertFalse(policy.customEntered)
+        var threshold = FanPolicy()
+        XCTAssertEqual(try threshold.evaluate(Self.frame(65), capabilities: Self.capabilities, profile: .standard, now: 0).demand, 0)
+        XCTAssertNil(try threshold.evaluate(Self.frame(64, at: 50), capabilities: Self.capabilities, profile: .standard, now: 50).demand)
         let edited = FanProfile(start: 50, maximum: 60)
         var editedPolicy = FanPolicy()
         XCTAssertEqual(try editedPolicy.evaluate(Self.frame(55), capabilities: Self.capabilities, profile: edited, now: 0).demand, 0.5)
@@ -73,7 +77,7 @@ final class FanPolicyTests: XCTestCase {
         _ = try policy.evaluate(Self.frame(60), capabilities: Self.capabilities, profile: .standard, now: 0)
         _ = try policy.evaluate(Self.frame(80, at: 2.5), capabilities: Self.capabilities, profile: .standard, now: 2.5)
         XCTAssertEqual(policy.smoothedCPU!, 60 + (1 - exp(-0.5)) * 20, accuracy: 0.00001)
-        XCTAssertFalse(policy.customEntered)
+        XCTAssertTrue(policy.customEntered)
     }
 
     func testRawProtectionBypassesSmoothingAndRecoversAfterTenSeconds() throws {
@@ -108,7 +112,7 @@ final class FanPolicyTests: XCTestCase {
         for (time, maximum) in [(0.0, 89.9), (1, 96.5), (2, 89.9), (3, 90), (4, 93), (5, 89.9), (6, 90), (7, 90)] {
             let decision = try evaluate(time, maximum)
             XCTAssertFalse(decision.protection, "\(time)"); XCTAssertNil(decision.reason, "\(time)")
-            XCTAssertEqual(try XCTUnwrap(decision.demand), 1.0 / 3, accuracy: 0.00001, "The ramp goes on: \(time)")
+            XCTAssertEqual(try XCTUnwrap(decision.demand), 0.5, accuracy: 0.00001, "The ramp goes on: \(time)")
         }
         XCTAssertFalse(policy.protectionActive)
         let third = try evaluate(8, 90)

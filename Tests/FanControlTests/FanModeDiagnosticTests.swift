@@ -296,7 +296,7 @@ final class FanModeDiagnosticTests: XCTestCase {
                 guard index == 3 else { return }
                 fans.apply(.mode(fan: 0, manual: true))
                 if change == 0 { fans.state.fans[1].mode = 1 }
-                if change == 1 { fans.state.fans[0].targetRPM = 4000 }
+                if change == 1 { fans.state.fans[0].targetRPM = fans.capabilities.fans[0].maximumRPM + 1 }
                 if change == 2 { fans.state.globalUnlock = 1 }
             }
             let trace = try mismatch(actuator, fans)
@@ -612,6 +612,51 @@ final class FanModeDiagnosticTests: XCTestCase {
         XCTAssertEqual(observation.fans[1].targetRPM, 300)
         XCTAssertEqual(actuator.lastManualModeDiagnostic?.probes.count, 2)
         XCTAssertNil(journal.record?.pending)
+    }
+
+    func testFirmwareSelectedEntryTargetIsAcknowledgedOnlyAfterTwoStableProbes() throws {
+        let fans = DiagnosticFans(), journal = DiagnosticJournal()
+        fans.state.fans[0].targetRPM = 2633
+        let actuator = try actuator(fans, journal)
+        fans.onRead = { index in
+            guard index >= 3 else { return }
+            fans.apply(.mode(fan: 0, manual: true))
+            // The first visible manual target differs from the pre-write
+            // automatic value; it then settles while the other fan stays auto.
+            fans.state.fans[0].targetRPM = index == 3 ? 2642 : 2650
+            fans.state.fans[1].targetRPM = Double(index) * 100
+        }
+        let observed = try actuator.mutate(.mode(fan: 0, manual: true), cancelled: { false },
+                                          manualModeCommit: { try $0(fans.clock.now) })
+        let trace = try XCTUnwrap(actuator.lastManualModeDiagnostic)
+        XCTAssertEqual(trace.termination, "acknowledged")
+        XCTAssertEqual(trace.probes.count, 4, "A changing entry target cannot count as two stable confirmations.")
+        XCTAssertEqual(observed.fans[0].targetRPM, 2650)
+        XCTAssertEqual(actuator.record?.acknowledged, observed)
+        XCTAssertNil(actuator.record?.pending)
+        XCTAssertEqual(fans.operations, [.mode(fan: 0, manual: true)], "No retry or target write during entry.")
+        fans.onRead = nil
+        fans.state.fans[0].targetRPM += 10
+        XCTAssertThrowsError(try actuator.verifyOwnership(conflict: nil), "Once acknowledged, target drift is still a conflict.")
+    }
+
+    func testEntryTargetAllowanceDoesNotMaskChangesToAnAlreadyOwnedFan() throws {
+        let fans = DiagnosticFans(), journal = DiagnosticJournal()
+        fans.deferWrites = false
+        let actuator = try actuator(fans, journal)
+        _ = try actuator.mutate(.mode(fan: 0, manual: true), cancelled: { false },
+                                manualModeCommit: { try $0(fans.clock.now) })
+        let first = fans.readStarts.count
+        fans.onRead = { index in
+            if index >= first + 2 {
+                fans.state.fans[0].targetRPM = 4000
+                fans.state.fans[1].targetRPM = 2600
+            }
+        }
+        XCTAssertThrowsError(try actuator.mutate(.mode(fan: 1, manual: true), cancelled: { false },
+                                                 manualModeCommit: { try $0(fans.clock.now) }))
+        XCTAssertEqual(actuator.lastManualModeDiagnostic?.termination, "unexpectedOwnership")
+        XCTAssertEqual(actuator.record?.pending, .mode(fan: 1, manual: true))
     }
 
     func testMissingMismatchedFailedOrStaleNativeReceiptCannotStartAcknowledgement() throws {

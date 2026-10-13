@@ -65,8 +65,8 @@ struct CoolingPage: View {
     // Both act on the toolkit helper as well.
     let setUpHelpers: () -> Void
     let removeHelpers: () -> Void
-    @State private var start: Double = 70
-    @State private var maximum: Double = 85
+    @State private var start: Double = FanProfile.standard.start
+    @State private var maximum: Double = FanProfile.standard.maximum
     @State private var showRecoveryConfirmation = false
     @State private var pendingRecoveryID: String?
     @State private var showRestoreConfirmation = false
@@ -211,13 +211,13 @@ struct CoolingPage: View {
         VStack(alignment: .leading, spacing: 8) {
             threshold("Start cooling", value: $start, range: 40...75)
             threshold("Maximum cooling", value: $maximum, range: 55...90)
-            Text("Keep at least 10 °C between thresholds. Apple automatic below the ramp; return at \(Int(start - 5)) °C after entering it.")
+            Text("Keep at least 10 °C between thresholds. MacHelm controls the fans at or above the start temperature, using the smoothed CPU die average. Below it, Apple controls the fans. Thermal protection can override this threshold.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("Save temperatures") { service.saveProfile(start: start, maximum: maximum) }
                     .disabled(!validProfile || !service.canSaveProfile)
-                Button("Defaults") { start = 70; maximum = 85 }
+                Button("Defaults") { start = FanProfile.standard.start; maximum = FanProfile.standard.maximum }
             }
             Text("Protection requests maximum cooling after three readings in a row of CPU die maximum ≥90 °C, or at once at GPU ≥85 °C or serious/critical system pressure. Recovery requires ten cool seconds.")
                 .font(.caption).foregroundStyle(.secondary)

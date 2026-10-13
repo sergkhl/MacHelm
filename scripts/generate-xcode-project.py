@@ -24,7 +24,7 @@ PROJECT_NAME = "MacHelm"
 PROJECT_PATH = Path("MacHelm.xcodeproj")
 BUNDLE_PREFIX = "io.github.sergkhl.MacHelm"
 VERSION = "0.1"
-BUILD = "1"
+BUILD = "2"
 
 
 class Reference(str):

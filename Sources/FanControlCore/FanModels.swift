@@ -28,7 +28,7 @@ public enum FanControlError: Error, LocalizedError, Equatable {
 public struct FanProfile: Codable, Equatable {
     public let start: Double
     public let maximum: Double
-    public static let standard = FanProfile(start: 70, maximum: 85)
+    public static let standard = FanProfile(start: 65, maximum: 85)
 
     public init(start: Double, maximum: Double) {
         self.start = start
