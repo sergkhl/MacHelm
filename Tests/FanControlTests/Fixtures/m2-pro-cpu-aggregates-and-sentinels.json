@@ -1,0 +1,64 @@
+{
+  "captured": "2026-10-08T13:00:28Z",
+  "channels": [
+    {
+      "attributes": 133,
+      "encoding": "flt ",
+      "key": "TCMz",
+      "rawHex": "33737d42",
+      "size": 4,
+      "value": 63.36249923706055
+    },
+    {
+      "attributes": 133,
+      "encoding": "flt ",
+      "key": "TCMb",
+      "rawHex": "c7305042",
+      "size": 4,
+      "value": 52.04763412475586
+    },
+    {
+      "attributes": 133,
+      "encoding": "flt ",
+      "key": "Tp01",
+      "rawHex": "6666d640",
+      "size": 4,
+      "value": 6.699999809265137
+    },
+    {
+      "attributes": 133,
+      "encoding": "flt ",
+      "key": "Tp05",
+      "rawHex": "89419440",
+      "size": 4,
+      "value": 4.632999897003174
+    },
+    {
+      "attributes": 133,
+      "encoding": "flt ",
+      "key": "Tp1h",
+      "rawHex": "4ae54e42",
+      "size": 4,
+      "value": 51.723915100097656
+    },
+    {
+      "attributes": 133,
+      "encoding": "flt ",
+      "key": "Tg0f",
+      "rawHex": "97624642",
+      "size": 4,
+      "value": 49.59627914428711
+    },
+    {
+      "attributes": 133,
+      "encoding": "flt ",
+      "key": "Tg0j",
+      "rawHex": "f5234742",
+      "size": 4,
+      "value": 49.78511428833008
+    }
+  ],
+  "effectiveUID": 505,
+  "source": "docs/validation/fan-control-2026-10-08/smc-temperature-inventory.json",
+  "sourceSHA256": "10bbecb23584b107eb2738b7e606ea5585c97777f6e5699bcb76cee14957243e"
+}

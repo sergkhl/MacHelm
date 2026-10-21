@@ -1,0 +1,19 @@
+# Xcode and Swift build products
+build/
+.build/
+.swiftpm/
+DerivedData/
+*.xcresult
+**/xcuserdata/
+**/*.xcuserstate
+
+# Local development state
+.DS_Store
+.claude/
+__pycache__/
+*.pyc
+
+# Private validation and machine-specific migration tools
+docs/validation/
+scripts/plan-startup-services-migration.py
+scripts/retire-hercules-startup.py

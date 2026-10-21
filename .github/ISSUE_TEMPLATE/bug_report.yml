@@ -1,0 +1,78 @@
+name: Bug report
+description: Report an issue with a MacHelm tool or the application
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the smallest set of steps that reproduces the issue. For vulnerabilities, use the private security-report link instead of this public form. Redact personal paths, service secrets, and unrelated process details from attachments.
+  - type: input
+    id: version
+    attributes:
+      label: MacHelm version or commit
+      description: Include the build number and whether this is your own build.
+      placeholder: "0.1 / build 1, built from commit ..."
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Mac and macOS
+      description: Include the model or chip and full macOS version.
+      placeholder: "MacBook Pro with M2 Pro, macOS 26.x"
+    validations:
+      required: true
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Affected tool
+      options:
+        - Cursor hide
+        - Fan Control
+        - Power
+        - Activity
+        - Storage
+        - Startup Services
+        - Application or build
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: State the initial settings and the actions that trigger the problem.
+      placeholder: |
+        1. Open ...
+        2. Choose ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Observed behavior
+      description: Include the exact error and how often it happens.
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Relevant setup
+      description: For helper issues, include approval state and signing type. For cursor issues, include the foreground app or game, display setup, shortcut availability, the shown request status, and what the pointer actually did. For services or storage, describe the affected target without sharing secrets.
+    validations:
+      required: false
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Checks and evidence
+      description: State what you actually ran (unit test, build, signed-artifact check, or native operation) and attach a short redacted excerpt if useful.
+    validations:
+      required: false
