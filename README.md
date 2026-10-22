@@ -1,8 +1,14 @@
 # MacHelm
 
-A macOS utility that brings cursor hiding, fan control, power settings, process activity, developer storage cleanup, and personal startup services into one window and the menu bar.
+A native macOS dashboard and menu bar for managing a developer workstation: cooling, power, process activity, storage cleanup, startup services, and cursor hiding.
+
+Inspect what is using the Mac, review cleanup targets, and manage personal services from one place. Each tool makes its effect explicit: opening a page reads state; changing a control or confirming a cleanup performs the action.
 
 **Version 0.1 · build 1.** This is a source release for macOS 26 or later. Build it with Xcode 26 or later. A signed, notarized application download is not included in this release.
+
+![MacHelm Overview showing cursor, cooling, power, activity, storage and startup-service controls](docs/images/overview.jpg)
+
+*Overview, captured from a local 0.1 development build. Live readings vary by machine.*
 
 ## Tools
 
@@ -18,6 +24,19 @@ A macOS utility that brings cursor hiding, fan control, power settings, process 
 The dashboard opens on Overview, with detailed pages in the sidebar. Closing the window leaves MacHelm running in the menu bar. Settings (`⌘,`) controls opening at login, the temperature/fan readout, and Activity's reading pace.
 
 On normal Quit, MacHelm attempts to restore its own cursor hide request, asks Fan Control to return its fans to automatic, and releases Keep Awake. Managed startup services continue running, and the macOS sleep timers retain their values.
+
+## Architecture
+
+The application separates the interface, decision rules, and operating-system effects so that ownership and recovery can be tested without commanding physical fans or changing personal services.
+
+| Component | Engineering approach |
+| --- | --- |
+| **Native interface** | [SwiftUI pages and an AppKit window](MacHelm/DashboardView.swift) share their state with the [menu bar](MacHelm/ToolkitMenuBar.swift). Overview and detailed pages draw controls and readings from the same tool state. |
+| **Privileged helpers** | A signed fan helper accepts a constrained [XPC protocol](Sources/FanControlCore/FanXPC.swift), with a single-client lease, fresh-telemetry checks, and durable recovery records. A [separate toolkit helper](docs/adr/0003-a-toolkit-helper-for-root-tasks-other-than-fans.md) handles privileged power settings. |
+| **System integration** | [Process sampling and ranking](Sources/ActivityCore) run without a root helper. The [service runner](Sources/StartupServicesCore) keeps login registration separate from current-session state. Storage calls the [Python cleanup utility](Storage/README.md), preserving its scan, selection, and confirmation steps. |
+| **Testable rules** | [Swift package targets](Package.swift) isolate fan policy and recovery, service lifecycle, cursor ownership, activity ranking, power, and storage behavior. Fake transports and fault injection exercise failure paths; signed-artifact and native checks provide separate evidence. |
+
+The [design decisions](docs/adr) explain these boundaries. The [fan verification record](docs/fan-control.md#verification-and-limits) documents dated tests and bounded native trials on a named M2 Pro, including their remaining limits.
 
 ## Build
 
@@ -55,6 +74,8 @@ These verify generated-file consistency and code/fixture behavior; passing them 
 ./scripts/verify-fan-artifact.sh build/xcode/Build/Products/Debug/MacHelm.app
 ./scripts/verify-toolkit-artifact.sh build/xcode/Build/Products/Debug/MacHelm.app
 ```
+
+## Compatibility and limits
 
 The cursor's “Hide requested” state records the owner's request. While it stands, MacHelm checks ten times a second whether macOS shows the system pointer and hides it again. It cannot hide the pointer while WindowServer gives the Dock control, and games may draw their own pointers. The [cursor documentation](docs/cursor-hide.md) explains these limits and normal-Quit cleanup.
 
