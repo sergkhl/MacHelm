@@ -4,7 +4,7 @@ A native macOS dashboard and menu bar for managing a developer workstation: cool
 
 Inspect what is using the Mac, review cleanup targets, and manage personal services from one place. Each tool makes its effect explicit: opening a page reads state; changing a control or confirming a cleanup performs the action.
 
-**Version 0.1 · build 1.** This is a source release for macOS 26 or later. Build it with Xcode 26 or later. A signed, notarized application download is not included in this release.
+**Version 0.1, build 1.** This is a source release for macOS 26 or later. Build it with Xcode 26 or later. A signed, notarized application download is not included in this release.
 
 ![MacHelm Overview showing cursor, cooling, power, activity, storage and startup-service controls](docs/images/overview.jpg)
 
@@ -77,7 +77,7 @@ These verify generated-file consistency and code/fixture behavior; passing them 
 
 ## Compatibility and limits
 
-The cursor's “Hide requested” state records the owner's request. While it stands, MacHelm checks ten times a second whether macOS shows the system pointer and hides it again. It cannot hide the pointer while WindowServer gives the Dock control, and games may draw their own pointers. The [cursor documentation](docs/cursor-hide.md) explains these limits and normal-Quit cleanup.
+The cursor's "Hide requested" state records the owner's request. While it stands, MacHelm checks ten times a second whether macOS shows the system pointer and hides it again. It cannot hide the pointer while WindowServer gives the Dock control, and games may draw their own pointers. The [cursor documentation](docs/cursor-hide.md) explains these limits and normal-Quit cleanup.
 
 Fan hardware access is restricted to the M2-family sensor map in the source and requires usable fans and sensor readings. Earlier development observations on one M2 Pro are limited historical evidence, not qualification of the renamed 0.1 artifact or all models in that map. Cursor hiding, Activity's GPU and power readings, and the lid-sleep feature use private or undocumented macOS interfaces and may be unavailable on other systems. The app is not sandboxed. Storage requires Python 3 and the relevant developer tools installed locally. Measuring device backups and the Trash needs Full Disk Access, which the Storage page helps you grant, and emptying the Trash asks once for permission to control Finder.
 
