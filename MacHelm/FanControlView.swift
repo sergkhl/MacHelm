@@ -28,18 +28,13 @@ private func readingRow(_ label: String, _ value: String) -> some View {
 // required recovery, which is resolved on the Cooling page.
 struct CoolingOverviewCard: View {
     @ObservedObject var service: FanControlService
-    let openCooling: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             FanControlRow(service: service)
             if service.recoveryRequired {
-                HStack(alignment: .firstTextBaseline) {
-                    Label("Recovery required", systemImage: "exclamationmark.triangle")
-                        .font(.caption.weight(.semibold))
-                    Spacer(minLength: 8)
-                    Button("Open Cooling", action: openCooling).controlSize(.small)
-                }
+                Label("Recovery required", systemImage: "exclamationmark.triangle")
+                    .font(.caption.weight(.semibold))
             }
             Divider()
             if let capabilities = service.status.capabilities, let snapshot = service.status.snapshot,
@@ -50,7 +45,7 @@ struct CoolingOverviewCard: View {
                     readingRow("Fans", "\(Int(fastest.rounded())) RPM")
                 }
             } else {
-                Text(service.helperApproved ? "No readings yet." : "Readings need the fan helper.")
+                Text(service.helperApproved ? "No readings yet" : "Fan helper required")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -75,9 +70,9 @@ struct CoolingPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             ToolPanel(title: "State", symbol: "switch.2") { state.padding(.bottom, 8) }
-            ToolPanel(title: "Readings", symbol: "thermometer.medium") { telemetry.padding(.bottom, 10) }
-            ToolPanel(title: "Temperature ramp", symbol: "chart.line.uptrend.xyaxis") { ramp.padding(.bottom, 10) }
-            ToolPanel(title: "Helper", symbol: "lock.shield") { helper.padding(.bottom, 10) }
+            ToolPanel(title: "Readings", symbol: "thermometer.medium", info: readingsInfo) { telemetry.padding(.bottom, 10) }
+            ToolPanel(title: "Temperatures", symbol: "chart.line.uptrend.xyaxis", info: rampInfo) { ramp.padding(.bottom, 10) }
+            ToolPanel(title: "Helpers", symbol: "lock.shield", info: helperInfo) { helper.padding(.bottom, 10) }
         }
         .onAppear { start = service.profile.start; maximum = service.profile.maximum }
         .alert("Verify external fan recovery?", isPresented: $showRecoveryConfirmation) {
@@ -111,7 +106,9 @@ struct CoolingPage: View {
     private var state: some View {
         VStack(alignment: .leading, spacing: 8) {
             FanControlRow(service: service)
-            Text(service.status.mode.title).font(.subheadline.weight(.semibold))
+            if service.status.mode.title != service.subtitle {
+                Text(service.status.mode.title).font(.subheadline.weight(.semibold))
+            }
             if let reason = service.message ?? service.status.reason {
                 Text(reason).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -172,34 +169,33 @@ struct CoolingPage: View {
         VStack(alignment: .leading, spacing: 6) {
             if let capabilities = service.status.capabilities, let snapshot = service.status.snapshot,
                (try? snapshot.validate(against: capabilities, now: ProcessInfo.processInfo.systemUptime)) != nil {
-                readingRow("Firmware CPU die average", String(format: "%.1f °C", snapshot.cpuDieAverage(in: capabilities)))
-                readingRow("Firmware CPU die maximum", String(format: "%.1f °C", snapshot.cpuDieMaximum(in: capabilities)))
-                readingRow("Hottest GPU", String(format: "%.1f °C", snapshot.hottestGPU(in: capabilities)))
-                Text("AppleSMC TCMb drives the ramp; TCMz protects the CPU. The firmware's exact averaging formula is undocumented.")
-                    .font(.caption2).foregroundStyle(.secondary)
+                readingRow("CPU average", String(format: "%.1f °C", snapshot.cpuDieAverage(in: capabilities)))
+                readingRow("CPU maximum", String(format: "%.1f °C", snapshot.cpuDieMaximum(in: capabilities)))
+                readingRow("GPU", String(format: "%.1f °C", snapshot.hottestGPU(in: capabilities)))
             } else {
-                Text("CPU/GPU telemetry requires a complete fresh qualified sensor set.")
+                Text("Temperature readings unavailable")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let probe = service.status.fanProbe {
+                Divider()
                 ForEach(probe.observation.fans) { fan in
                     HStack(alignment: .top) {
                         Text("Fan \(fan.id + 1)").font(.caption)
                         Spacer()
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text("Actual: \(Int(fan.actualRPM.rounded())) RPM")
+                            Text("\(Int(fan.actualRPM.rounded())) RPM · \(fan.isAutomatic ? "Auto" : "Manual")")
+                                .font(.callout)
                             if let requested = service.status.requestedRPM[fan.id] {
-                                Text("Requested: \(Int(requested.rounded())) RPM")
+                                Text("Requested \(Int(requested.rounded())) · Target \(Int(fan.targetRPM.rounded())) RPM")
                             } else {
-                                Text(service.enabled ? "Requested: Apple automatic" : "Requested: none (control off)")
+                                Text("\(service.enabled ? "Apple automatic" : "Control off") · Target \(Int(fan.targetRPM.rounded())) RPM")
                             }
-                            Text("Observed: \(fan.isAutomatic ? "automatic" : "manual"), target \(Int(fan.targetRPM.rounded())) RPM")
-                                .foregroundStyle(.secondary)
                         }.font(.caption2).monospacedDigit()
                     }
+                    .accessibilityElement(children: .combine)
                 }
             } else {
-                Text("Live fan speeds are read while Fan Control is on or this window shows them, after helper approval.")
+                Text(service.helperApproved ? "Fan readings unavailable" : "Fan helper required")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -209,19 +205,20 @@ struct CoolingPage: View {
 
     private var ramp: some View {
         VStack(alignment: .leading, spacing: 8) {
-            threshold("Start cooling", value: $start, range: 40...75)
-            threshold("Maximum cooling", value: $maximum, range: 55...90)
-            Text("Keep at least 10 °C between thresholds. MacHelm takes control of the fans at the start temperature, using the smoothed CPU die average, and gives them back to Apple after ten seconds below it. Thermal protection can override this threshold.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button("Save temperatures") { service.saveProfile(start: start, maximum: maximum) }
-                    .disabled(!validProfile || !service.canSaveProfile)
-                Button("Defaults") { start = FanProfile.standard.start; maximum = FanProfile.standard.maximum }
+            threshold("Start", value: $start, range: 40...75)
+            threshold("Maximum", value: $maximum, range: 55...90)
+            if !validProfile {
+                Label("Keep at least 10 °C between thresholds.", systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
             }
-            Text("Protection requests maximum cooling after three readings in a row of CPU die maximum ≥90 °C, or at once at GPU ≥85 °C or serious/critical system pressure. Recovery requires ten cool seconds.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Save") { service.saveProfile(start: start, maximum: maximum) }
+                    .disabled(!validProfile || !service.canSaveProfile)
+                    .accessibilityLabel("Save temperatures")
+                ToolIconButton("Restore default temperatures", symbol: "arrow.counterclockwise") {
+                    start = FanProfile.standard.start; maximum = FanProfile.standard.maximum
+                }
+            }
         }
     }
 
@@ -234,7 +231,7 @@ struct CoolingPage: View {
             Stepper(value: value, in: range, step: 1) {
                 Text("\(Int(value.wrappedValue)) °C").monospacedDigit().frame(width: 50, alignment: .trailing)
             }
-            .frame(width: 110).accessibilityLabel(label)
+            .frame(width: 110).accessibilityLabel("\(label) cooling temperature")
         }
     }
 
@@ -244,14 +241,27 @@ struct CoolingPage: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(service.helperDescription).font(.subheadline.weight(.semibold))
             HStack {
-                Button("Set up helpers", action: setUpHelpers)
+                Button("Set Up", action: setUpHelpers)
                     .disabled(service.busy || service.helperApproved)
-                Button("System Settings") { service.openHelperSettings() }
+                    .accessibilityLabel("Set up helpers")
+                ToolIconButton("Open helper settings", symbol: "gearshape") { service.openHelperSettings() }
+                Spacer()
+                Button("Remove", action: removeHelpers)
+                    .disabled(!service.canMutateHelper || service.recoveryRequired)
+                    .accessibilityLabel("Remove helpers")
             }
-            Button("Remove helpers", action: removeHelpers).disabled(!service.canMutateHelper || service.recoveryRequired)
-            Text("Set up helpers and Remove helpers act on both of MacHelm's helpers: this one and the toolkit helper on the Power page. Removing them ends Fan Control and Keep Awake with the lid closed. Fan Control starts as you left it when MacHelm last ran. Quit Macs Fan Control and return any existing custom settings to automatic before enabling.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var readingsInfo: String {
+        "CPU average is the firmware CPU die average; CPU maximum is the hottest CPU die reading, and GPU is the hottest GPU reading. AppleSMC TCMb drives the ramp and TCMz protects the CPU. The firmware's averaging formula is undocumented. Temperature readings need a complete, fresh, qualified sensor set.\n\nEach fan shows its measured speed and observed mode. Requested is MacHelm's command; Target is the target reported by the fan. Live fan speeds are read while Fan Control is on or this window shows them, after helper approval."
+    }
+
+    private var rampInfo: String {
+        "Keep at least 10 °C between Start and Maximum. MacHelm takes control at Start using the smoothed CPU die average, and returns the fans to Apple after ten seconds below it.\n\nThermal protection requests maximum cooling after three CPU maximum readings of at least 90 °C, or immediately at GPU ≥85 °C or serious/critical system pressure. Recovery requires ten cool seconds."
+    }
+
+    private var helperInfo: String {
+        "Set Up and Remove act on both the fan helper and the toolkit helper. Removing them ends Fan Control and Keep Awake with the lid closed. Fan Control starts as you left it when MacHelm last ran. Quit Macs Fan Control and return any existing custom settings to automatic before enabling."
     }
 }

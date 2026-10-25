@@ -39,7 +39,7 @@ final class MacHelmLifecycle: NSObject, NSApplicationDelegate {
         self.preferences = preferences
         self.dashboard = dashboard
         statusMenu = ToolkitMenuBar(host: tools, openDashboard: { dashboard.show() },
-                                   openActivity: { dashboard.show(.activity) })
+                                   openPage: { dashboard.show($0) })
         FanAlerts.shared.openCooling = { dashboard.show(.cooling) }
         let launch = NSAppleEventManager.shared().currentAppleEvent
         let loginLaunch = launch?.eventID == kAEOpenApplication &&

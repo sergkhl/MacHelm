@@ -151,7 +151,7 @@ private final class Once: @unchecked Sendable {
     }
 }
 
-// Keep Awake, the battery level, Sleep Now and the four sleep timers.
+// Keep Awake, the battery level and the four sleep timers.
 @MainActor
 final class PowerService: ObservableObject {
     // The owner's last choice (Q20): it starts as it was left.
@@ -172,8 +172,6 @@ final class PowerService: ObservableObject {
     @Published private(set) var charge: Int?
     // Why the latest change did not take.
     @Published private(set) var notice: String?
-    // Sleep Now was pressed and waits for still hands (L32).
-    @Published private(set) var sleepPending = false
 
     private static let onKey = "KeepAwakeOn"
     private static let levelKey = "KeepAwakeBatteryLevel"
@@ -186,14 +184,6 @@ final class PowerService: ObservableObject {
     private var holdConfirmed = false
     // Counts the requests to hold or release, so that only the latest one's reply is acted on.
     private var holdRequest = 0
-    // Sleep Now from the press to the owner's return: the wait for still
-    // hands, and the hold it lifted, which the owner's wake puts back.
-    private var course = SleepNowCourse() {
-        didSet {
-            let pending = course.waiting != nil
-            if pending != sleepPending { sleepPending = pending }
-        }
-    }
     // Counts the later attempts, so that only the latest one asks again.
     private var retry = 0
     private var source: CFRunLoopSource?
@@ -209,48 +199,20 @@ final class PowerService: ObservableObject {
         }
         watchPowerSource()
         let center = NSWorkspace.shared.notificationCenter
-        observers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
-            // At once, before the Mac sleeps.
-            MainActor.assumeIsolated { self?.course.sleepBegins() }
-        })
         observers.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.woke(displaysCameOn: false) }
+            Task { @MainActor in self?.update() }
         })
         observers.append(center.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.woke(displaysCameOn: true) }
+            Task { @MainActor in self?.update() }
         })
         update()
-    }
-
-    // A wake, or the displays coming on. After Sleep Now the hold comes back
-    // with the owner only: this Mac also wakes by itself for seconds at a
-    // time with its display off, and a hold set then would keep it from
-    // sleeping again.
-    private func woke(displaysCameOn: Bool) {
-        if course.wake(displayAwake: displaysCameOn || Self.displayAwake) {
-            update()
-        } else {
-            // The display may come on a moment after the wake is told.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                guard let self, self.course.lifted, Self.displayAwake, self.course.wake(displayAwake: true) else { return }
-                self.update()
-            }
-        }
-    }
-
-    private static var displayAwake: Bool {
-        let display = CGMainDisplayID()
-        return display != kCGNullDirectDisplay && CGDisplayIsAsleep(display) == 0
     }
 
     // MARK: State
 
     // Reads the helper's registration, the power source and the timers, and
-    // puts in force what the switch asks for. For when the owner looks or
-    // presses: they are at the Mac, so what Sleep Now lifted is in force
-    // again, also if the wake that should have said so was missed.
+    // puts in force what the switch asks for.
     func refresh() {
-        course.ownerIsHere()
         update()
     }
 
@@ -327,7 +289,6 @@ final class PowerService: ObservableObject {
 
     // Puts in force what the policy says for the state the Mac is in now.
     private func evaluate() {
-        guard !course.lifted else { return }
         let effect = KeepAwakePolicy.effect(on: keepAwakeOn, onBattery: onBattery, charge: charge, level: batteryLevel,
                                             helperAvailable: helper == .ready)
         setAssertion(effect.preventsIdleSleep)
@@ -399,79 +360,6 @@ final class PowerService: ObservableObject {
             IOPMAssertionRelease(assertion)
             assertion = 0
         }
-    }
-
-    // MARK: Sleep Now
-
-    // Q10: it does not ask, and it sleeps the Mac also with Keep Awake on.
-    // L32: macOS is asked once trackpad and keyboard have been still for a
-    // moment, because a touch in a sleep's first seconds calls it off, and the
-    // finger that pressed Sleep Now is such a touch.
-    func sleepNow() {
-        guard let press = course.press() else { return }
-        waitForStillHands(press, since: ProcessInfo.processInfo.systemUptime)
-    }
-
-    private func waitForStillHands(_ press: Int, since pressed: TimeInterval) {
-        // A sleep or a wake in between ended the wait: a press from before a
-        // sleep must not put the Mac to sleep after its wake.
-        guard course.waits(press) else { return }
-        // Of the hardware alone: an event another program posts does not wake a Mac.
-        let idle = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: Self.anyInput)
-        guard SleepNowWait.asks(idle: idle, waited: ProcessInfo.processInfo.systemUptime - pressed) else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + SleepNowWait.pace) { [weak self] in
-                self?.waitForStillHands(press, since: pressed)
-            }
-            return
-        }
-        sleepAtOnce()
-    }
-
-    // kCGAnyInputEventType, which Swift does not name.
-    private static let anyInput = CGEventType(rawValue: ~0)!
-
-    // With stay-awake held macOS would refuse, so the hold is lifted first;
-    // the owner's wake puts it back.
-    private func sleepAtOnce() {
-        let sleep = course.ask(lifting: holdAsked)
-        guard holdAsked else {
-            Self.sleep()
-            // A hold that an earlier Sleep Now lifted, for a sleep that never began, still has to come back.
-            return restoreIfSleepNeverBegins(sleep)
-        }
-        holdAsked = false
-        holdConfirmed = false
-        let once = Once { [weak self] _ in
-            Task { @MainActor in
-                // The owner looked or pressed meanwhile and Keep Awake is in
-                // force again: that stands, and this sleep is dropped. Letting
-                // go of the connection now would end the newer hold.
-                guard let self, self.course.lifted else { return }
-                self.client.setHeld(false)
-                Self.sleep()
-                self.restoreIfSleepNeverBegins(sleep)
-            }
-        }
-        client.holdStayAwake(false) { once.call($0) }
-        // A helper that does not answer is not waited for longer than at Quit.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { once.call(nil) }
-    }
-
-    // Should the sleep never begin, Keep Awake comes back by itself. A sleep
-    // that began ends with the owner's wake alone: these thirty seconds also
-    // run out while the Mac is awake by itself, asleep for the owner.
-    private func restoreIfSleepNeverBegins(_ sleep: Int) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
-            guard let self, self.course.fallback(sleep) else { return }
-            self.update()
-        }
-    }
-
-    private static func sleep() {
-        let port = IOPMFindPowerManagement(mach_port_t(MACH_PORT_NULL))
-        guard port != 0 else { return }
-        IOPMSleepSystem(port)
-        IOServiceClose(port)
     }
 
     // MARK: Sleep timers

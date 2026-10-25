@@ -124,14 +124,13 @@ struct ActivityPage: View {
             if let notice = store.notice {
                 HStack(alignment: .firstTextBaseline) {
                     Label(notice, systemImage: "exclamationmark.triangle").font(.caption)
-                    Button("Dismiss") { store.clearNotice() }.controlSize(.small)
+                    ToolIconButton("Dismiss", symbol: "xmark") { store.clearNotice() }.controlSize(.small)
                 }
             }
             HStack(alignment: .firstTextBaseline) {
-                Text(caption)
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                InfoButton(caption, label: "About activity readings")
                 Spacer(minLength: 12)
+                Text("Average").font(.caption).foregroundStyle(.secondary)
                 Picker("Averaged over", selection: $store.windowLength) {
                     ForEach(ActivityWindow.lengths, id: \.self) { Text(ActivityText.span($0)).tag($0) }
                 }
@@ -141,7 +140,7 @@ struct ActivityPage: View {
                 .fixedSize()
                 .accessibilityLabel("Averaged over")
                 .accessibilityIdentifier("activity-window-length")
-                Button("Open Activity Monitor") {
+                ToolIconButton("Open Activity Monitor", symbol: "arrow.up.forward.app") {
                     NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app"),
                                                        configuration: NSWorkspace.OpenConfiguration())
                 }
@@ -311,7 +310,6 @@ private struct ActivityRowView: View {
 // The Overview's share of Activity: the heaviest process group for each measure.
 struct ActivityOverviewCard: View {
     @ObservedObject var store: ActivityStore
-    let openActivity: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -337,10 +335,13 @@ struct ActivityOverviewCard: View {
                 Text("Measuring…").font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
             }
             HStack {
-                Text(store.snapshot.map { "Heaviest over the last \(ActivityText.span($0.seconds))" } ?? "Heaviest processes")
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button("Show All", action: openActivity).controlSize(.small)
+                if let snapshot = store.snapshot {
+                    Text("\(ActivityText.span(snapshot.seconds)) average")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                InfoButton("The heaviest process group for each measure, averaged over the window selected on the Activity page. CPU uses the percentage of one core; a group can exceed 100% when using multiple cores.",
+                           label: "About activity readings")
+                Spacer(minLength: 0)
             }
             .padding(.vertical, 8)
         }

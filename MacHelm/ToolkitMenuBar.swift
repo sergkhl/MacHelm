@@ -2,26 +2,26 @@ import AppKit
 import Combine
 
 // The app's one menu bar item: the quiet entry point after a login launch.
-// Its menu opens the dashboard, toggles Fan Control and Keep Awake, sleeps the
-// Mac, lists the five heaviest processes and holds the app's own login
-// switch; what it holds is decided by ToolkitMenu. It reads the same
+// Its menu links to the dashboard, toggles Fan Control and Keep Awake,
+// lists the five heaviest CPU groups and holds the app's own login switch;
+// what it holds is decided by ToolkitMenu. It reads the same
 // state objects as the dashboard, so the two surfaces cannot disagree about
 // whether a tool is on.
 @MainActor
 final class ToolkitMenuBar: NSObject, NSMenuDelegate {
     private let host: ToolHost
     private let openDashboard: () -> Void
-    private let openActivity: () -> Void
+    private let openPage: (DashboardPage) -> Void
     private let item: NSStatusItem
     private let menu = NSMenu()
     private var shown: FanMenuBarReadout?
     private var shownHold = false
     private var subscriptions: Set<AnyCancellable> = []
 
-    init(host: ToolHost, openDashboard: @escaping () -> Void, openActivity: @escaping () -> Void) {
+    init(host: ToolHost, openDashboard: @escaping () -> Void, openPage: @escaping (DashboardPage) -> Void) {
         self.host = host
         self.openDashboard = openDashboard
-        self.openActivity = openActivity
+        self.openPage = openPage
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         menu.delegate = self
@@ -71,6 +71,7 @@ final class ToolkitMenuBar: NSObject, NSMenuDelegate {
         host.cooling.refreshHelperStatus()
         host.startupServices.refreshOpenAtLogin()
         host.power.refresh()
+        host.storage.refreshSpace()
         // The list is built from what Activity read while the menu was shut.
         host.activity.bringUpToDate()
         rebuild()
@@ -96,9 +97,10 @@ final class ToolkitMenuBar: NSObject, NSMenuDelegate {
         let heaviest = snapshot?.rows[.cpu]?.map {
             ToolkitMenuProcess(name: $0.group.name, origin: ActivityText.origin($0.group.origin), value: ActivityMeasure.cpu.text($0.value))
         }
-        let entries = ToolkitMenu.entries(fanSubtitle: fan.subtitle, fanOn: fan.enabled,
+        let entries = ToolkitMenu.entries(fanOn: fan.enabled,
                                           fanCanToggle: fan.canMutateHelper && !fan.recoveryRequired,
                                           keepAwakeOn: host.power.keepAwakeOn, keepAwakeNote: keepAwakeNote,
+                                          availableSpace: host.storage.available,
                                           heaviest: heaviest, span: ActivityText.span(snapshot?.seconds ?? host.activity.windowLength),
                                           openAtLogin: host.startupServices.openAtLogin)
         for entry in entries { menu.addItem(item(for: entry)) }
@@ -107,45 +109,63 @@ final class ToolkitMenuBar: NSObject, NSMenuDelegate {
     private func item(for entry: ToolkitMenuEntry) -> NSMenuItem {
         switch entry {
         case .openDashboard:
-            return action("Open MacHelm", #selector(showDashboard), key: "o")
+            return action("Open MacHelm", #selector(showDashboard), symbol: "square.grid.2x2", key: "o")
         case .separator:
             return .separator()
-        case .fanControl(let subtitle, let on, let canToggle):
+        case .fanControl(let on, let canToggle):
             // The toggle carries the state it was shown with. A row that went
             // stale under the open menu then does nothing, instead of the opposite.
-            let fanItem = action("Fan Control — \(subtitle)", #selector(toggleFanControl(_:)), checked: on, enabled: canToggle)
+            let fanItem = action("Fan Control", #selector(toggleFanControl(_:)), symbol: "fan", checked: on, enabled: canToggle)
             fanItem.representedObject = on
+            fanItem.toolTip = host.cooling.subtitle
             fanItem.setAccessibilityLabel(on ? "Turn off fan control" : "Turn on fan control")
             return fanItem
         case .keepAwake(let on, let note):
             // Like the fan's entry, it carries the state it was shown with.
-            let entry = action("Keep Awake", #selector(toggleKeepAwake(_:)), checked: on)
+            let entry = action("Keep Awake", #selector(toggleKeepAwake(_:)), symbol: "sun.max", checked: on)
             entry.representedObject = on
             entry.subtitle = note
             entry.setAccessibilityLabel(on ? "Turn off Keep Awake" : "Turn on Keep Awake")
             return entry
-        case .sleepNow:
-            return action("Sleep Now", #selector(sleepNow))
-        case .heaviestHeader(let title):
-            return .sectionHeader(title: title)
+        case .storage(let available):
+            let space = available.map { "\($0.formatted(.byteCount(style: .file))) available" } ?? "Unavailable"
+            return action("Storage · \(space)", #selector(showStorage), symbol: "internaldrive")
+        case .startupServices:
+            return action("Startup Services", #selector(showStartupServices), symbol: "power")
+        case .activity(let span):
+            let entry = action("Activity", #selector(showActivity), symbol: "waveform.path.ecg")
+            let detail = span.map { "Heaviest by CPU, last \($0)" } ?? "Heaviest by CPU"
+            entry.toolTip = detail
+            entry.setAccessibilityLabel("Activity: \(detail)")
+            return entry
         case .measuring:
-            return action("Measuring…", nil, enabled: false)
+            let entry = action("Measuring…", nil, enabled: false)
+            entry.indentationLevel = 1
+            return entry
         case .process(let process):
             // A click opens the Activity page. Nothing is quit from here: a slip would end an app.
             let row = action(process.value.isEmpty ? process.name : "\(process.name) — \(process.value)", #selector(showActivity),
+                             symbol: process.value.isEmpty ? nil : "app",
                              enabled: !process.value.isEmpty)
             row.subtitle = process.origin
+            row.indentationLevel = 1
             return row
         case .openAtLogin(let on):
-            return action("Open MacHelm at Login", #selector(toggleOpenAtLogin), checked: on)
+            return action("Open at Login", #selector(toggleOpenAtLogin), symbol: "person.crop.circle", checked: on)
         case .quit:
-            return action("Quit MacHelm", #selector(quit), key: "q")
+            return action("Quit", #selector(quit), symbol: "xmark.circle", key: "q")
         }
     }
 
-    private func action(_ title: String, _ selector: Selector?, key: String = "", checked: Bool = false,
+    private func action(_ title: String, _ selector: Selector?, symbol: String? = nil, key: String = "", checked: Bool = false,
                         enabled: Bool = true) -> NSMenuItem {
         let entry = NSMenuItem(title: title, action: selector, keyEquivalent: key)
+        if let symbol {
+            let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            image?.isTemplate = true
+            image?.size = NSSize(width: 16, height: 16)
+            entry.image = image
+        }
         entry.target = self
         entry.state = checked ? .on : .off
         entry.isEnabled = enabled
@@ -156,7 +176,11 @@ final class ToolkitMenuBar: NSObject, NSMenuDelegate {
 
     @objc private func showDashboard() { openDashboard() }
 
-    @objc private func showActivity() { openActivity() }
+    @objc private func showActivity() { openPage(.activity) }
+
+    @objc private func showStorage() { openPage(.storage) }
+
+    @objc private func showStartupServices() { openPage(.startupServices) }
 
     @objc private func toggleFanControl(_ sender: NSMenuItem) {
         guard sender.representedObject as? Bool == host.cooling.enabled else { return }
@@ -167,8 +191,6 @@ final class ToolkitMenuBar: NSObject, NSMenuDelegate {
         guard sender.representedObject as? Bool == host.power.keepAwakeOn else { return }
         host.power.setKeepAwake(!host.power.keepAwakeOn)
     }
-
-    @objc private func sleepNow() { host.power.sleepNow() }
 
     // What holds when that is less than the switch asks for: paused on battery, or no helper for the lid.
     private var keepAwakeNote: String? {

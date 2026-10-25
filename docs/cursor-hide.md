@@ -1,6 +1,6 @@
 # Cursor hide
 
-Press **Ctrl+Option+Command+H** (`⌃⌥⌘H`) to hide the system pointer while MacHelm runs, including while another application is active, and press it again to restore it. The shortcut is fixed. The dashboard's Cursor and Overview pages expose the same control.
+Press **Ctrl+Option+Command+H** (`⌃⌥⌘H`) to hide the system pointer while MacHelm runs, including while another application is active, and press it again to restore it. The shortcut is fixed. The dashboard's Tweaks and Overview pages expose the same control.
 
 The shortcut uses an exclusive global hot-key registration and does not require Accessibility permission. If another application already owns that combination, MacHelm reports that the shortcut is unavailable; the dashboard controls remain available. Holding the keys does not repeatedly toggle the state.
 

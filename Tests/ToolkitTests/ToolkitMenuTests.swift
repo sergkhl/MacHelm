@@ -1,10 +1,7 @@
 import XCTest
 @testable import ToolkitCore
 
-// The owner's request of 2026-10-11 and SR-Q5: the menu bar menu has no list
-// of services, no Cursor Fix and no diagnostics; Open MacHelm at Login
-// stays. Since 2026-10-12 it holds Keep Awake and Sleep Now and lists the
-// five heaviest processes by CPU (Q9 and Q17 of the Power and Storage record).
+// Quick controls, direct page links and the five heaviest CPU groups.
 final class ToolkitMenuTests: XCTestCase {
     private let five = [
         ToolkitMenuProcess(name: "Blender", origin: "from codex ← Ghostty", value: "221%"),
@@ -14,18 +11,20 @@ final class ToolkitMenuTests: XCTestCase {
         ToolkitMenuProcess(name: "Brave Browser", value: "7.2%")
     ]
 
-    func testTheMenuIsOpenFanControlPowerTheHeaviestLoginAndQuit() {
-        let entries = ToolkitMenu.entries(fanSubtitle: "Tap to enable", fanOn: false, fanCanToggle: true,
+    func testTheMenuIncludesStorageStartupServicesAndActivityWithItsCPUList() {
+        let entries = ToolkitMenu.entries(fanOn: false, fanCanToggle: true,
                                           keepAwakeOn: true, keepAwakeNote: "Paused at 18% on battery",
+                                          availableSpace: 128_000_000_000,
                                           heaviest: five, span: "10 seconds", openAtLogin: true)
         XCTAssertEqual(entries, [
             .openDashboard,
             .separator,
-            .fanControl(subtitle: "Tap to enable", on: false, canToggle: true),
+            .fanControl(on: false, canToggle: true),
             .keepAwake(on: true, note: "Paused at 18% on battery"),
-            .sleepNow,
+            .storage(available: 128_000_000_000),
+            .startupServices,
             .separator,
-            .heaviestHeader("Heaviest by CPU, last 10 seconds"),
+            .activity(span: "10 seconds"),
             .process(five[0]), .process(five[1]), .process(five[2]), .process(five[3]), .process(five[4]),
             .separator,
             .openAtLogin(on: true),
@@ -34,33 +33,40 @@ final class ToolkitMenuTests: XCTestCase {
     }
 
     func testTheEntriesCarryTheStateTheyWereShownWith() {
-        let entries = ToolkitMenu.entries(fanSubtitle: "Recovery required", fanOn: true, fanCanToggle: false,
+        let entries = ToolkitMenu.entries(fanOn: true, fanCanToggle: false,
                                           keepAwakeOn: false, keepAwakeNote: nil,
+                                          availableSpace: 0,
                                           heaviest: five, span: "5 minutes", openAtLogin: false)
-        XCTAssertTrue(entries.contains(.fanControl(subtitle: "Recovery required", on: true, canToggle: false)))
+        XCTAssertTrue(entries.contains(.fanControl(on: true, canToggle: false)))
         XCTAssertTrue(entries.contains(.openAtLogin(on: false)))
         XCTAssertTrue(entries.contains(.keepAwake(on: false, note: nil)))
-        XCTAssertTrue(entries.contains(.heaviestHeader("Heaviest by CPU, last 5 minutes")))
+        XCTAssertTrue(entries.contains(.storage(available: 0)))
+        XCTAssertTrue(entries.contains(.activity(span: "5 minutes")))
     }
 
     func testNoMoreThanFiveAreListed() {
-        let entries = ToolkitMenu.entries(fanSubtitle: "", fanOn: false, fanCanToggle: true, keepAwakeOn: false, keepAwakeNote: nil,
+        let entries = ToolkitMenu.entries(fanOn: false, fanCanToggle: true, keepAwakeOn: false, keepAwakeNote: nil,
+                                          availableSpace: nil,
                                           heaviest: five + [ToolkitMenuProcess(name: "Sixth", value: "1%")], span: "10 seconds",
                                           openAtLogin: true)
         XCTAssertEqual(entries.filter { if case .process = $0 { return true } else { return false } }.count, 5)
         XCTAssertFalse(entries.contains(.process(ToolkitMenuProcess(name: "Sixth", value: "1%"))))
     }
 
-    func testBeforeTheFirstFiguresTheMenuSaysItIsMeasuring() {
-        let entries = ToolkitMenu.entries(fanSubtitle: "", fanOn: false, fanCanToggle: true, keepAwakeOn: false, keepAwakeNote: nil, heaviest: nil, span: "10 seconds",
+    func testPageLinksRemainAvailableBeforeTheFirstFigures() {
+        let entries = ToolkitMenu.entries(fanOn: false, fanCanToggle: true, keepAwakeOn: false, keepAwakeNote: nil,
+                                          availableSpace: nil, heaviest: nil, span: "10 seconds",
                                           openAtLogin: true)
-        XCTAssertEqual(Array(entries[6...8]), [.heaviestHeader("Heaviest by CPU"), .measuring, .separator])
+        XCTAssertTrue(entries.contains(.storage(available: nil)))
+        XCTAssertTrue(entries.contains(.startupServices))
+        XCTAssertEqual(Array(entries[7...9]), [.activity(span: nil), .measuring, .separator])
     }
 
     func testWithNothingToListTheMenuSaysSo() {
-        let entries = ToolkitMenu.entries(fanSubtitle: "", fanOn: false, fanCanToggle: true, keepAwakeOn: false, keepAwakeNote: nil, heaviest: [], span: "10 seconds",
+        let entries = ToolkitMenu.entries(fanOn: false, fanCanToggle: true, keepAwakeOn: false, keepAwakeNote: nil,
+                                          availableSpace: nil, heaviest: [], span: "10 seconds",
                                           openAtLogin: true)
-        XCTAssertEqual(Array(entries[6...8]), [.heaviestHeader("Heaviest by CPU, last 10 seconds"),
+        XCTAssertEqual(Array(entries[7...9]), [.activity(span: "10 seconds"),
                                               .process(ToolkitMenuProcess(name: "Nothing to list", value: "")), .separator])
     }
 }

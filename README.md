@@ -4,24 +4,22 @@ A native macOS dashboard and menu bar for managing a developer workstation: cool
 
 Inspect what is using the Mac, review cleanup targets, and manage personal services from one place. Each tool makes its effect explicit: opening a page reads state; changing a control or confirming a cleanup performs the action.
 
-**Version 0.1, build 1.** This is a source release for macOS 26 or later. Build it with Xcode 26 or later. A signed, notarized application download is not included in this release.
-
-![MacHelm Overview showing cursor, cooling, power, activity, storage and startup-service controls](docs/images/overview.jpg)
-
-*Overview, captured from a local 0.1 development build. Live readings vary by machine.*
+**Version 0.1, build 2.** This is a source release for macOS 26 or later. Build it with Xcode 26 or later. A signed, notarized application download is not included in this release.
 
 ## Tools
 
 | Tool | What it does |
 | --- | --- |
-| **Cursor hide** | Hides the system pointer with **Ctrl+Option+Command+H** (`⌃⌥⌘H`), including while another app is active, and hides it again if macOS shows it before you restore it. This experimental feature uses private WindowServer APIs; see [behavior and compatibility](docs/cursor-hide.md). |
 | **Fan Control** | Uses a temperature ramp with CPU, GPU, and thermal-pressure protection. A signed helper controls the fans and tracks ownership and recovery. See [behavior and hardware limits](docs/fan-control.md). |
-| **Power** | Keep Awake, Sleep Now, and the macOS display and system sleep timers. Keep Awake can pause at a chosen battery level; the helper adds control over lid sleep and the system timers. |
+| **Power** | Keep Awake and the macOS display and system sleep timers. Keep Awake can pause at a chosen battery level; the helper adds control over lid sleep and the system timers. |
 | **Activity** | Shows the five heaviest process groups for CPU, memory, GPU, energy, and disk over a selected time window. Expand a row to inspect its processes, quit an app, or open Activity Monitor. |
 | **Storage** | Scans developer caches, simulators, runtimes, and Android emulators, as well as app caches, leftover update downloads, idle Codex chats and Claude Code sessions, merged or idle worktrees, device backups, and the Trash. Review the measured targets and confirm a cleanup; what cannot be restored starts unchecked. The [Python cleanup utility](Storage/README.md) also works in a terminal. |
 | **Startup Services** | Imports your LaunchAgents or adds programs and scripts. Manage their login behavior and current-session state while keeping each service's launchd rules. See [Startup Services](docs/startup-services.md). |
+| **Tweaks** | Cursor hide uses **Ctrl+Option+Command+H** (`⌃⌥⌘H`) to hide or restore the system pointer, including while another app is active. This experimental feature uses private WindowServer APIs; see [behavior and compatibility](docs/cursor-hide.md). |
 
-The dashboard opens on Overview, with detailed pages in the sidebar. Closing the window leaves MacHelm running in the menu bar. Settings (`⌘,`) controls opening at login, the temperature/fan readout, and Activity's reading pace.
+The dashboard opens on Overview. Click a card heading to open its detailed page, or select it in the sidebar. General explanations are available from info buttons; current readings, status and problems stay visible. Tweaks follows Startup Services, and Settings (`⌘,`) stays at the bottom of the sidebar.
+
+Closing the window leaves MacHelm running in the menu bar. Its menu offers Fan Control and Keep Awake, available storage space, Startup Services, and a clickable Activity group with the five heaviest CPU groups. Activity uses the selected averaging window and keeps the menu's displayed snapshot stable until it closes. Settings controls opening at login, the temperature/fan readout, and Activity's reading pace.
 
 On normal Quit, MacHelm attempts to restore its own cursor hide request, asks Fan Control to return its fans to automatic, and releases Keep Awake. Managed startup services continue running, and the macOS sleep timers retain their values.
 

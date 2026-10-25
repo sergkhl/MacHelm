@@ -3,18 +3,24 @@ import SwiftUI
 struct CursorControls: View {
     @ObservedObject var controller: CursorController
 
+    static var help: String {
+        "Press \(CursorController.shortcutLabel) to hide or restore the system pointer in any app. The shortcut is fixed and needs no Accessibility permission.\n\nThis feature is experimental. MacHelm keeps its hide request active until you restore it or quit. The pointer can still appear over the Dock, and some games draw their own pointer."
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ToolRow(icon: "cursorarrow", title: "Cursor hide",
-                    subtitle: controller.hidden ? "Hide requested · press again to restore" : CursorController.shortcutLabel,
+                    subtitle: controller.hidden ? "Hide requested · \(CursorController.shortcutLabel)" : CursorController.shortcutLabel,
                     isActive: controller.hidden) {
-                Button(controller.hidden ? "Restore" : "Hide") { controller.toggle() }
+                ToolIconButton(controller.hidden ? "Restore cursor" : "Hide cursor",
+                               symbol: controller.hidden ? "eye" : "eye.slash") { controller.toggle() }
                     .controlSize(.small)
                     .accessibilityIdentifier("cursor-toggle")
             }
-            if !controller.shortcutAvailable {
-                Label("The global shortcut is unavailable. Another app may already use it.", systemImage: "keyboard")
+            if !controller.shortcutAvailable && controller.message == nil {
+                Label("Shortcut unavailable", systemImage: "keyboard")
                     .font(.caption).foregroundStyle(.secondary)
+                    .help("Another app may already use \(CursorController.shortcutLabel).")
             }
             if let message = controller.message {
                 Text(message).font(.caption).foregroundStyle(.secondary)
@@ -30,16 +36,8 @@ struct CursorPage: View {
     @ObservedObject var controller: CursorController
 
     var body: some View {
-        ToolPanel(group: .cursor) {
-            VStack(alignment: .leading, spacing: 12) {
-                CursorControls(controller: controller)
-                Text("Press \(CursorController.shortcutLabel) to hide or restore the system pointer while another app is active. The shortcut is fixed and does not require Accessibility permission.")
-                Text("This feature is experimental. If macOS shows the pointer again before you restore it, MacHelm hides it again within a tenth of a second, except while it is over the Dock. Some games draw their own pointer. MacHelm restores its own hide request on Quit.")
-                    .foregroundStyle(.secondary)
-            }
-            .font(.callout)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.bottom, 12)
+        ToolPanel(title: "Cursor", symbol: "cursorarrow", info: CursorControls.help) {
+            CursorControls(controller: controller)
         }
     }
 }

@@ -39,26 +39,21 @@ struct AvailableSpaceLine: View {
 // The Overview's share of Storage: available space and what the last scan found.
 struct StorageOverviewCard: View {
     @ObservedObject var storage: StorageService
-    let openStorage: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             AvailableSpaceLine(storage: storage)
-            HStack(alignment: .firstTextBaseline) {
-                Text(lastScan).font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
-                Button("Open Storage", action: openStorage).controlSize(.small)
-            }
-            .padding(.vertical, 8)
+            Text(lastScan).font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 8)
         }
         .onAppear { storage.refreshSpace() }
     }
 
     private var lastScan: String {
-        guard let at = storage.scannedAt else { return "Not scanned yet. A scan runs only when you ask for it." }
+        guard let at = storage.scannedAt else { return "Not scanned" }
         let defaults = StorageSelection(defaultsOf: storage.targets, helperReady: storage.helperReady).total(in: storage.targets)
-        return "Scanned \(at.formatted(.relative(presentation: .named))): \(size(defaults.kilobytes)) can be reclaimed safely."
+        return "\(size(defaults.kilobytes)) reclaimable · \(at.formatted(.relative(presentation: .named)))"
     }
 }
 
@@ -72,10 +67,12 @@ struct StoragePage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            ToolPanel(title: "Startup Disk", symbol: "internaldrive") {
+            ToolPanel(title: "Startup Disk", symbol: "internaldrive",
+                      info: "Available space includes space macOS can reclaim, as Finder reports it.") {
                 AvailableSpaceLine(storage: storage)
             }
-            ToolPanel(title: "Cleanup", symbol: "shippingbox") {
+            ToolPanel(title: "Cleanup", symbol: "shippingbox",
+                      info: "Scan lists and measures cleanup targets without removing anything. Review your selection, then choose Clean. Removal always asks for confirmation and is permanent.") {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(state).font(.subheadline)
@@ -95,29 +92,27 @@ struct StoragePage: View {
                                         now: StorageActivity.steps(of: storage.removing, working: storage.working),
                                         failed: storage.results.values.filter { !$0.ok }.count)
                     }
-                    VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
                         Stepper(value: $storage.idleDays, in: StorageIdle.days) {
-                            Text("Idle for at least \(storage.idleDays) \(storage.idleDays == 1 ? "day" : "days")").font(.subheadline)
+                            Text("Idle: \(storage.idleDays) \(storage.idleDays == 1 ? "day" : "days")").font(.subheadline)
                         }
                         .disabled(storage.phase != .idle)
+                        .accessibilityLabel("Minimum idle days")
                         .accessibilityIdentifier("storage-idle-days")
-                        Text("Codex chats, Claude Code sessions and worktrees left alone this long are listed. A change applies at the next scan.")
-                            .font(.caption).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        InfoButton("Codex chats, Claude Code sessions and worktrees idle for at least this many days are listed. A change applies at the next scan.", label: "About idle targets")
                     }
                     .controlSize(.small)
                     .padding(.bottom, 8)
                     if storage.needsFullDiskAccess {
                         Divider()
                         HStack(alignment: .firstTextBaseline) {
-                            Label("Full Disk Access is off: device backups and the Trash can't be measured, and some app data can't be read.",
+                            Label("Full Disk Access off · some targets unavailable",
                                   systemImage: "lock.shield")
                                 .font(.caption)
                                 .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 8)
-                            Button("Open Settings…") { storage.openFullDiskAccessSettings() }
-                                .controlSize(.small)
-                                .help("Switch MacHelm on under Full Disk Access, then scan again.")
+                            InfoButton("Device backups and the Trash can't be measured, and some app data can't be read. Enable MacHelm under Full Disk Access in System Settings, then scan again.", label: "About unavailable targets")
+                            ToolIconButton("Open Full Disk Access settings", symbol: "gearshape") { storage.openFullDiskAccessSettings() }
                         }
                         .padding(.vertical, 8)
                     }
@@ -146,10 +141,10 @@ struct StoragePage: View {
                         HStack(alignment: .firstTextBaseline) {
                             Text(selected).font(.subheadline)
                             Spacer(minLength: 8)
-                            Button("Select All") { storage.selectAll() }
+                            ToolIconButton("Select all targets", symbol: "checkmark.square") { storage.selectAll() }
                                 .disabled(storage.phase != .idle || storage.allSelected)
                                 .accessibilityIdentifier("storage-select-all")
-                            Button("Select None") { storage.selectNone() }
+                            ToolIconButton("Clear selection", symbol: "square") { storage.selectNone() }
                                 .disabled(storage.phase != .idle || storage.selection.keys.isEmpty)
                                 .accessibilityIdentifier("storage-select-none")
                             Button("Clean…") { confirming = true }
@@ -178,17 +173,17 @@ struct StoragePage: View {
 
     private var state: String {
         switch storage.phase {
-        case .scanning: return "Scanning: measuring what can be cleaned. Nothing is removed."
-        case .cleaning: return "Removing what you checked…"
+        case .scanning: return "Scanning…"
+        case .cleaning: return "Cleaning…"
         case .idle:
-            guard let at = storage.scannedAt else { return "Not scanned yet. A scan lists and measures; it removes nothing." }
-            return "Scanned \(at.formatted(date: .omitted, time: .shortened)): \(storage.targets.count) found."
+            guard let at = storage.scannedAt else { return "Not scanned" }
+            return "\(storage.targets.count) targets · \(at.formatted(date: .omitted, time: .shortened))"
         }
     }
 
     private var selected: String {
         let total = storage.selection.total(in: storage.chosen)
-        return "Checked: \(total.atLeast ? "at least " : "")\(size(total.kilobytes))"
+        return "Selected: \(total.atLeast ? "at least " : "")\(size(total.kilobytes))"
     }
 }
 
@@ -503,7 +498,8 @@ private struct StorageTargetRow: View {
             Spacer(minLength: 8)
             // A root target the app cannot remove offers the command for a terminal (Q25).
             if StorageSelection.needsTerminal(target, helperReady: storage.helperReady) {
-                Button("Copy command") { storage.copyCommand(for: target) }.controlSize(.mini)
+                ToolIconButton("Copy cleanup command", symbol: "doc.on.doc") { storage.copyCommand(for: target) }
+                    .controlSize(.mini)
             }
             Text(value).font(.subheadline).monospacedDigit()
                 .foregroundStyle(target.state == .selectable ? .primary : .secondary)

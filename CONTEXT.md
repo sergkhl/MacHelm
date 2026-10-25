@@ -4,9 +4,11 @@ These terms connect the interface, shared code, and documentation. The design ra
 
 ## Application
 
-**Tool** is one operation or feature: cursor hiding, Fan Control, Keep Awake, Sleep Now, sleep timers, Activity, Storage, or a startup service. Each keeps its own state and cleanup behavior.
+**Tool** is one operation or feature: cursor hiding, Fan Control, Keep Awake, sleep timers, Activity, Storage, or a startup service. Each keeps its own state and cleanup behavior.
 
 **Tool group** is the collection shown on a dashboard page. **Dashboard** is the app's main window. **Overview** is its first page, with quick controls and live readings; a group's **page** holds its details.
+
+**Tweaks** is the last tool group, after Startup Services in the sidebar and at the bottom of Overview. It currently contains Cursor hide. Settings stays at the bottom of the sidebar. Overview card headings open their detail pages; contextual info buttons hold general explanations while readings, current state and problems remain visible.
 
 **Quit MacHelm** follows the application's normal termination path. It attempts to restore an owned cursor hide request, requests automatic fan control, and releases Keep Awake. It retains saved preferences and leaves startup services and the macOS sleep timers in place. This differs from Activity's Quit action for another app and from forcefully terminating MacHelm.
 
@@ -16,7 +18,7 @@ These terms connect the interface, shared code, and documentation. The design ra
 
 ## Cursor
 
-**Cursor hide** is the experimental control for the system pointer. Its fixed global shortcut is **Ctrl+Option+Command+H** (`⌃⌥⌘H`). The dashboard's Cursor and Overview pages offer the same toggle.
+**Cursor hide** is the experimental control for the system pointer. Its fixed global shortcut is **Ctrl+Option+Command+H** (`⌃⌥⌘H`). The dashboard's Tweaks and Overview pages offer the same toggle.
 
 **Hide requested** means the owner asked for the system pointer to be hidden and has not restored it. While the request stands, MacHelm checks every 100 ms whether macOS shows the pointer and, if it does, hides it again; it owns at most one hide accepted by its private WindowServer backend. It says nothing about a pointer drawn inside a game.
 
@@ -24,7 +26,7 @@ These terms connect the interface, shared code, and documentation. The design ra
 
 ## Cooling
 
-**Start temperature** is the profile's lower threshold: **Start cooling** on the Cooling page, 70 °C by default. Fan Control takes the fans when the smoothed CPU die average reaches it, and keeps them until the average has stayed below it for ten seconds. There is no separate release temperature. **Maximum cooling**, 85 °C by default, is where demand reaches its maximum.
+**Start temperature** is the profile's lower threshold: **Start** under Temperatures on the Cooling page, 70 °C by default. Fan Control takes the fans when the smoothed CPU die average reaches it, and keeps them until the average has stayed below it for ten seconds. There is no separate release temperature. **Maximum**, 85 °C by default, is where demand reaches its maximum.
 
 **Release** gives MacHelm's fans back to Apple's automatic control. Each fan MacHelm set to manual mode is set back to automatic, and nothing else is written. It follows ten seconds below the start temperature. It happens at once when Fan Control is turned off, and on quit, sleep, a lost connection or an expired lease.
 
@@ -44,6 +46,8 @@ These terms connect the interface, shared code, and documentation. The design ra
 
 **Reading pace** is the sampling interval: one pace in the background and another, which can be set quicker, while the lists or menu are open. Both are five seconds by default. A pace cannot exceed the selected window.
 
+**Activity menu group** is a clickable Activity row followed by the five heaviest CPU groups. The row and each process open the Activity page. The menu uses the same averaging window and retains its displayed snapshot until closed, so rows do not move under the pointer.
+
 **Own process** belongs to the current user. **System process** belongs to root or another system user; its available measures are limited to CPU and GPU, and it has no control actions in Activity.
 
 **Starter** is the first parent observed for a process, retained after that parent exits. **Responsible app** is the application macOS associates with a process. **Origin** is the starter chain for an app copy, with incidental shell and package-runner steps omitted. **Process kind** describes a helper's role, such as browser tab, extension, GPU, or network; it does not identify the web page shown by a browser tab.
@@ -58,13 +62,13 @@ These terms connect the interface, shared code, and documentation. The design ra
 
 **Battery level** is the threshold at or below which Keep Awake pauses on battery. The default is 20%; connecting the power adapter allows it to resume.
 
-**Sleep Now** requests system sleep, including while Keep Awake is enabled. The app waits briefly for input to become idle; input around the sleep transition can cause macOS to wake again. Keep Awake can resume after wake.
-
 **Sleep timers** are macOS's display and system sleep settings for battery and power-adapter use. MacHelm reads them and, with the toolkit helper, updates them. They persist after the app quits.
 
 ## Storage
 
 **Storage** shows available startup-disk space and offers its cleanup: developer tools, app caches, update downloads, AI-tool history, worktrees, device backups, and the Trash. **Available space** includes space macOS reports as reclaimable, as Finder does.
+
+The Storage menu item refreshes available space when the menu opens and links to the Storage page. Reading available space does not run a cleanup scan.
 
 **Cleanup script** is `Storage/cleanup-macos-dev.py`, the authority for discovery and cleanup rules. **Scan** lists and measures targets without deleting them. It runs only when requested.
 

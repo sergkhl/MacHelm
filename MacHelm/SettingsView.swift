@@ -14,44 +14,52 @@ struct ToolkitSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Open MacHelm at login", isOn: Binding(get: { services.openAtLogin }, set: { services.setOpenAtLogin($0) }))
-                Text("Opens MacHelm in the menu bar when you log in, without showing its window. Your startup services start at login whether or not MacHelm is open.")
-                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Toggle("Open at login", isOn: Binding(get: { services.openAtLogin }, set: { services.setOpenAtLogin($0) }))
+                        .accessibilityLabel("Open MacHelm at login")
+                    InfoButton("Opens MacHelm in the menu bar at login without showing its window. Startup services start at login whether or not MacHelm is open.", label: "About opening at login")
+                }
                 if let failure = services.generalFailure {
                     Label(failure, systemImage: "exclamationmark.triangle").font(.caption)
                 }
             }
-            Section {
-                Toggle("Show temperature and fan speed in the menu bar",
-                       isOn: Binding(get: { fan.menuBarReadoutEnabled }, set: { fan.setMenuBarReadout($0) }))
-                    .accessibilityIdentifier("fan-control-menu-bar-readout")
-                Text("The CPU temperature above the faster fan's speed, while the fan helper is approved. While it is shown, the helper reads the fans once a second.")
-                    .font(.caption).foregroundStyle(.secondary)
+            Section("Menu Bar") {
+                HStack {
+                    Toggle("Temperature & fan speed",
+                           isOn: Binding(get: { fan.menuBarReadoutEnabled }, set: { fan.setMenuBarReadout($0) }))
+                        .accessibilityLabel("Show temperature and fan speed in the menu bar")
+                        .accessibilityIdentifier("fan-control-menu-bar-readout")
+                    InfoButton("Shows the CPU temperature above the faster fan's speed when the fan helper is approved. While visible, the helper reads the fans once a second.", label: "About the menu bar readout")
+                }
             }
-            Section("Activity") {
-                Picker("Read the processes in the background every", selection: $activity.backgroundPace) {
+            Section {
+                Picker("Background", selection: $activity.backgroundPace) {
                     ForEach(ActivityPace.background, id: \.self) { Text(ActivityText.span($0)).tag($0) }
                 }
+                .accessibilityLabel("Activity background reading interval")
                 .accessibilityIdentifier("activity-background-pace")
-                Picker("While the lists or the menu are open, every", selection: $activity.onScreenPace) {
-                    ForEach(ActivityPace.onScreen, id: \.self) { Text($0 == 1 ? "second" : ActivityText.span($0)).tag($0) }
+                Picker("While visible", selection: $activity.onScreenPace) {
+                    ForEach(ActivityPace.onScreen, id: \.self) { Text($0 == 1 ? "1 second" : ActivityText.span($0)).tag($0) }
                 }
+                .accessibilityLabel("Activity reading interval while lists or menu are open")
                 .accessibilityIdentifier("activity-on-screen-pace")
-                Text("Activity reads whenever MacHelm runs, so the menu bar menu has figures at once. A slower pace costs less; a process that starts and ends between two readings is not seen. A pace is never longer than the window chosen on the Activity page.")
-                    .font(.caption).foregroundStyle(.secondary)
+            } header: {
+                HStack {
+                    Text("Activity")
+                    InfoButton("Activity reads whenever MacHelm runs, so the menu has figures ready. While visible applies when the lists or menu are open. A slower interval costs less; processes that start and end between readings are not seen. An interval never exceeds the averaging window selected on Activity.", label: "About Activity reading intervals")
+                }
             }
             Section("Storage") {
                 LabeledContent("Full Disk Access") {
                     HStack {
                         Text(fullDiskAccess == true ? "On" : fullDiskAccess == false ? "Off" : "Unknown")
-                        Button("Check Again") { fullDiskAccess = StorageService.fullDiskAccess }
-                        Button("Open Settings…") { storage.openFullDiskAccessSettings() }
+                        InfoButton("Storage needs Full Disk Access to measure and remove device backups, measure the Trash, and read some apps' data. It also lets MacHelm and what it starts read Mail, Messages and Safari data. After enabling it, macOS asks to quit and reopen MacHelm.", label: "About Full Disk Access")
+                        ToolIconButton("Check Full Disk Access", symbol: "arrow.clockwise") { fullDiskAccess = StorageService.fullDiskAccess }
+                        ToolIconButton("Open Full Disk Access settings", symbol: "gearshape") { storage.openFullDiskAccessSettings() }
                     }
                     .controlSize(.small)
                 }
                 .accessibilityIdentifier("storage-full-disk-access")
-                Text("Storage needs it to measure and remove device backups, measure the Trash, and read some apps' data. It also lets MacHelm and what it starts read Mail, Messages and Safari data. After switching it on, macOS asks to quit and reopen MacHelm.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

@@ -13,15 +13,17 @@ struct StartupServicesGroup: View {
         VStack(alignment: .leading, spacing: 10) {
             header
             if !store.isInstalled {
-                notice("Install MacHelm in the Applications folder to start services or change their startup. Until then this list is for viewing and importing.",
+                notice("Install in Applications to manage services. Viewing and importing are available.",
                        symbol: "arrow.down.app")
             }
             if store.permissionBlocked {
                 VStack(alignment: .leading, spacing: 6) {
-                    notice("macOS is blocking MacHelm's background items, so services cannot be started here. The same switch also covers the Fan Control helper.",
+                    notice("Background items blocked. Services cannot start.",
                            symbol: "hand.raised")
-                    Button("Open Login Items & Extensions") { store.openLoginItemsSettings() }
-                        .controlSize(.small)
+                    HStack {
+                        InfoButton("Enable MacHelm in Login Items & Extensions. This switch also covers the Fan Control helper.", label: "About blocked background items")
+                        ToolIconButton("Open Login Items & Extensions", symbol: "gearshape") { store.openLoginItemsSettings() }
+                    }
                 }
             }
             if let failure = store.loadFailure {
@@ -30,11 +32,11 @@ struct StartupServicesGroup: View {
             if let failure = store.generalFailure {
                 HStack(alignment: .top) {
                     notice(failure, symbol: "exclamationmark.triangle")
-                    Button("Dismiss") { store.clearFailure(for: nil) }.controlSize(.small)
+                    ToolIconButton("Dismiss error", symbol: "xmark") { store.clearFailure(for: nil) }
                 }
             }
             if store.services.isEmpty, store.loaded, store.loadFailure == nil {
-                Text("No services yet. Import one of your LaunchAgents, or add a program or script. Nothing is started by adding it.")
+                Text("No services. Import or add one to get started.")
                     .font(.callout).foregroundStyle(.secondary)
                     .padding(.vertical, 8)
             }
@@ -51,17 +53,11 @@ struct StartupServicesGroup: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Each service is its own launchd job and keeps running after MacHelm quits.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 10) {
-                Spacer(minLength: 8)
-                Button("Import…") { showImport = true }
-                    .help("Add one of your existing LaunchAgents to this list. Nothing is started, stopped or changed.")
-                Button("Add…") { showAdd = true }
-                    .help("Add a program or script. It is saved switched off and is not run.")
-            }
+        HStack(spacing: 10) {
+            InfoButton("Each service is its own launchd job and keeps running after MacHelm quits. Import adds an existing LaunchAgent for viewing without changing it. Add saves a program or script switched off, without running it.", label: "About Startup Services")
+            Spacer(minLength: 8)
+            ToolIconButton("Import a LaunchAgent", symbol: "square.and.arrow.down") { showImport = true }
+            ToolIconButton("Add a service", symbol: "plus") { showAdd = true }
         }
         .controlSize(.small)
     }
@@ -202,16 +198,16 @@ private struct ServiceRow: View {
             if definition.command.arguments.count > 1 {
                 detail("Arguments", definition.command.arguments.dropFirst().map(Self.quoted).joined(separator: " "), monospaced: true)
             }
-            if let directory = definition.command.workingDirectory { detail("Working directory", directory, monospaced: true) }
+            if let directory = definition.command.workingDirectory { detail("Working folder", directory, monospaced: true) }
             detail("launchd label", definition.label, monospaced: true)
-            detail("Owner", ownerText)
+            detail("Owner", ownerText, info: ownerInfo)
             if case .managed(_, let backup?) = definition.ownership {
-                detail("Original kept at", backup.path, monospaced: true)
+                detail("Backup", backup.path, monospaced: true)
             }
             if let result = status.lastResult { detail("Last result", result.summary) }
-            if let runs = status.runs { detail("Runs this session", "\(runs)") }
+            if let runs = status.runs { detail("Session runs", "\(runs)") }
             ForEach(definition.dependencies, id: \.self) { detail("Depends on", $0) }
-            detail("Readiness", "Not checked. Running only shows that a process exists.")
+            detail("Readiness", "Not checked", info: "Running means a process exists. MacHelm has not checked whether the service is ready to accept work.")
 
             HStack(spacing: 8) {
                 TextField("Name", text: $draftName)
@@ -221,7 +217,7 @@ private struct ServiceRow: View {
                 Button("Rename", action: rename)
                     .disabled(draftName.trimmingCharacters(in: .whitespaces).isEmpty || draftName == definition.name)
                 Spacer()
-                Button("View Log…") { showLog = true }
+                ToolIconButton("View service log", symbol: "doc.text.magnifyingglass") { showLog = true }
                     .disabled(store.logPaths(for: definition).isEmpty)
                     .help(store.logPaths(for: definition).isEmpty ? "This service does not write a log file." : "Show the end of this service's log.")
                 if status.actions.contains(.remove) {
@@ -239,21 +235,28 @@ private struct ServiceRow: View {
     }
 
     private var ownerText: String {
-        guard definition.isManaged else { return "Its original LaunchAgent. MacHelm only shows it." }
+        guard definition.isManaged else { return "Original LaunchAgent" }
         switch status.loadedInstance {
-        case .original: return "MacHelm. The job loaded now is still the original definition; the managed one is used after Stop and Start here, or from the next login."
+        case .original: return "MacHelm · original loaded"
         default: return "MacHelm"
         }
     }
 
-    private func detail(_ title: String, _ value: String, monospaced: Bool = false) -> some View {
+    private var ownerInfo: String? {
+        guard definition.isManaged else { return "The original LaunchAgent owns this service. MacHelm only shows it." }
+        guard case .original = status.loadedInstance else { return nil }
+        return "MacHelm manages this service, but the job loaded now still uses the original definition. The managed definition applies after Stop and Start here, or from the next login."
+    }
+
+    private func detail(_ title: String, _ value: String, monospaced: Bool = false, info: String? = nil) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(title).font(.caption).foregroundStyle(.secondary).frame(width: 118, alignment: .trailing)
             Text(value).font(monospaced ? .caption.monospaced() : .caption)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
+            if let info { InfoButton(info, label: "About \(title.lowercased())") }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
     }
 
     private func rename() {
@@ -324,8 +327,8 @@ private struct ServiceLogSheet: View {
             }
             .background(.quaternary, in: .rect(cornerRadius: 8))
             HStack {
-                Button("Reload") { load() }
-                Button("Show in Finder") {
+                ToolIconButton("Reload log", symbol: "arrow.clockwise") { load() }
+                ToolIconButton("Show log in Finder", symbol: "folder") {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: selected)])
                 }
                 .disabled(!FileManager.default.fileExists(atPath: selected))
@@ -355,10 +358,10 @@ private struct ImportServiceSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Import a LaunchAgent").font(.headline)
-            Text("Importing adds the LaunchAgent to Startup Services for viewing. It keeps running under its own definition and nothing is started, stopped or changed. To manage it here, choose Manage with MacHelm afterwards.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Text("Import LaunchAgent").font(.headline)
+                InfoButton("Import adds a LaunchAgent for viewing. It keeps running under its own definition; nothing is started, stopped or changed. Choose Manage with MacHelm afterwards to manage it here.", label: "About importing LaunchAgents")
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     if store.discovered.isEmpty {
@@ -372,9 +375,7 @@ private struct ImportServiceSheet: View {
                                      ?? URL(fileURLWithPath: agent.path).lastPathComponent)
                                     .font(.subheadline.weight(.semibold))
                                 Text(agent.label ?? agent.path).font(.caption.monospaced()).foregroundStyle(.secondary)
-                                if agent.inCatalog {
-                                    Text("Already in Startup Services.").font(.caption).foregroundStyle(.secondary)
-                                } else if let definition = agent.definition {
+                                if !agent.inCatalog, let definition = agent.definition {
                                     Text(definition.triggerDescription).font(.caption).foregroundStyle(.secondary)
                                 } else if let refusal = agent.refusal {
                                     Text(refusal).font(.caption).foregroundStyle(.orange)
@@ -383,7 +384,7 @@ private struct ImportServiceSheet: View {
                             }
                             Spacer(minLength: 8)
                             if agent.inCatalog {
-                                Text("In the list").font(.caption).foregroundStyle(.secondary)
+                                Label("Imported", systemImage: "checkmark").font(.caption).foregroundStyle(.secondary)
                             } else if agent.definition != nil {
                                 Button("Import") { store.importLaunchAgent(at: URL(fileURLWithPath: agent.path)) }
                                     .controlSize(.small)
@@ -401,7 +402,7 @@ private struct ImportServiceSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
-                Button("Choose a File…") { chooseFile() }
+                ToolIconButton("Choose a LaunchAgent file", symbol: "folder") { chooseFile() }
                 Spacer()
                 Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
             }
@@ -447,17 +448,25 @@ private struct AddServiceSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Add a Service").font(.headline)
+            HStack {
+                Text("Add Service").font(.headline)
+                InfoButton("Arguments are entered one per line and passed exactly as written; no shell reads them. The working folder is optional. The service is saved switched off: it does not run now or start at login until enabled.", label: "About adding a service")
+            }
             Form {
                 TextField("Name", text: $name)
                 HStack {
-                    TextField("Program or script", text: $program)
-                    Button("Choose…") { choose(directories: false) { program = $0 } }
+                    TextField("Program", text: $program)
+                        .accessibilityLabel("Program or script")
+                    ToolIconButton("Choose a program or script", symbol: "folder") { choose(directories: false) { program = $0 } }
                 }
-                TextField("Arguments, one per line", text: $arguments, axis: .vertical).lineLimit(2...5)
+                TextField("Arguments", text: $arguments, axis: .vertical).lineLimit(2...5)
+                    .help("One argument per line")
+                    .accessibilityLabel("Arguments, one per line")
                 HStack {
-                    TextField("Working directory (optional)", text: $workingDirectory)
-                    Button("Choose…") { choose(directories: true) { workingDirectory = $0 } }
+                    TextField("Working folder", text: $workingDirectory)
+                        .help("Optional working directory")
+                        .accessibilityLabel("Working directory, optional")
+                    ToolIconButton("Choose a working folder", symbol: "folder") { choose(directories: true) { workingDirectory = $0 } }
                 }
                 Picker("Runs", selection: $preset) {
                     ForEach(Preset.allCases) { Text($0.rawValue).tag($0) }
@@ -471,9 +480,6 @@ private struct AddServiceSheet: View {
                     Stepper("Minute: \(String(format: "%02d", minute))", value: $minute, in: 0...59)
                 }
             }
-            Text("Each argument line is passed to the program exactly as written; no shell reads it. The service is saved switched off: it does not run now and does not start at login until you switch that on.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
             if let failure = store.generalFailure {
                 Label(failure, systemImage: "xmark.octagon").font(.caption).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)

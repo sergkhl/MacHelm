@@ -17,12 +17,13 @@ public struct ToolkitMenuProcess: Equatable {
 public enum ToolkitMenuEntry: Equatable {
     case openDashboard
     case separator
-    case fanControl(subtitle: String, on: Bool, canToggle: Bool)
+    case fanControl(on: Bool, canToggle: Bool)
     // The note says what holds when that is less than the switch asks for.
     case keepAwake(on: Bool, note: String?)
-    case sleepNow
-    // "Heaviest by CPU, last 10 seconds"
-    case heaviestHeader(String)
+    case storage(available: Int64?)
+    case startupServices
+    // Opens Activity even before the first figures are ready.
+    case activity(span: String?)
     case process(ToolkitMenuProcess)
     // No figures yet.
     case measuring
@@ -30,24 +31,24 @@ public enum ToolkitMenuEntry: Equatable {
     case quit
 }
 
-// What the menu bar menu holds (owner, 2026-10-11 and SR-Q5; Keep Awake,
-// Sleep Now and the heaviest processes since 2026-10-12, Q9 and Q17 of the
-// Power and Storage record). Startup services are managed in the dashboard
-// and are not listed here.
+// The menu's quick controls and links to the dashboard. Activity keeps the
+// five heaviest CPU groups visible beneath its own navigation entry.
 public enum ToolkitMenu {
-    public static func entries(fanSubtitle: String, fanOn: Bool, fanCanToggle: Bool,
+    public static func entries(fanOn: Bool, fanCanToggle: Bool,
                                keepAwakeOn: Bool, keepAwakeNote: String?,
+                               availableSpace: Int64?,
                                heaviest: [ToolkitMenuProcess]?, span: String,
                                openAtLogin: Bool) -> [ToolkitMenuEntry] {
         var entries: [ToolkitMenuEntry] = [.openDashboard, .separator,
-                                           .fanControl(subtitle: fanSubtitle, on: fanOn, canToggle: fanCanToggle),
-                                           .keepAwake(on: keepAwakeOn, note: keepAwakeNote), .sleepNow, .separator]
+                                           .fanControl(on: fanOn, canToggle: fanCanToggle),
+                                           .keepAwake(on: keepAwakeOn, note: keepAwakeNote),
+                                           .storage(available: availableSpace), .startupServices, .separator,
+                                           .activity(span: heaviest == nil ? nil : span)]
         if let heaviest {
-            entries.append(.heaviestHeader("Heaviest by CPU, last \(span)"))
             entries += heaviest.isEmpty ? [.process(ToolkitMenuProcess(name: "Nothing to list", value: ""))]
                                         : heaviest.prefix(5).map { .process($0) }
         } else {
-            entries += [.heaviestHeader("Heaviest by CPU"), .measuring]
+            entries.append(.measuring)
         }
         return entries + [.separator, .openAtLogin(on: openAtLogin), .quit]
     }

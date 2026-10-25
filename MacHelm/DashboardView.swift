@@ -12,7 +12,7 @@ final class ToolHost {
     let startupServices = StartupServicesStore()
     // The heaviest processes. It only reads, in the background too (ADR 0005, ADR 0006).
     let activity: ActivityStore
-    // Keep Awake, Sleep Now and the sleep timers. Keep Awake's hold ends on quit; the timers are macOS's own.
+    // Keep Awake and the sleep timers. Keep Awake's hold ends on quit; the timers are macOS's own.
     let power = PowerService()
     // Available space and the developer storage cleanup. Nothing is scanned or removed unless the owner asks.
     let storage: StorageService
@@ -55,13 +55,13 @@ final class ToolHost {
 }
 
 enum ToolGroup: String, CaseIterable, Identifiable {
-    case cursor, cooling, power, activity, storage, startupServices
+    case cooling, power, activity, storage, startupServices, cursor
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .cursor: return "Cursor"
+        case .cursor: return "Tweaks"
         case .cooling: return "Cooling"
         case .power: return "Power"
         case .activity: return "Activity"
@@ -72,7 +72,7 @@ enum ToolGroup: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
-        case .cursor: return "cursorarrow"
+        case .cursor: return "slider.horizontal.3"
         case .cooling: return "fan"
         case .power: return "powersleep"
         case .activity: return "waveform.path.ecg"
@@ -96,7 +96,7 @@ enum ToolGroup: String, CaseIterable, Identifiable {
 
 // The dashboard's pages (ADR 0001): the Overview, then one page for each tool group.
 enum DashboardPage: String, CaseIterable, Identifiable {
-    case overview, cursor, cooling, power, activity, storage, startupServices
+    case overview, cooling, power, activity, storage, startupServices, cursor
 
     var id: String { rawValue }
 
@@ -156,23 +156,91 @@ final class DashboardModel: ObservableObject {
     }
 }
 
+// Explanations stay close to their controls without occupying the normal layout.
+struct InfoButton: View {
+    let text: String
+    let label: String
+    @State private var isPresented = false
+
+    init(_ text: String, label: String = "More information") {
+        self.text = text
+        self.label = label
+    }
+
+    var body: some View {
+        Button { isPresented.toggle() } label: {
+            Image(systemName: "info.circle")
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help(label)
+        .accessibilityLabel(label)
+        .popover(isPresented: $isPresented) {
+            Text(text)
+                .font(.callout)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(16)
+                .frame(width: 340, alignment: .leading)
+        }
+    }
+}
+
+// Familiar actions keep a full name for hover help and VoiceOver.
+struct ToolIconButton: View {
+    let title: String
+    let symbol: String
+    let action: () -> Void
+
+    init(_ title: String, symbol: String, action: @escaping () -> Void) {
+        self.title = title
+        self.symbol = symbol
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol).labelStyle(.iconOnly)
+        }
+        .help(title)
+        .accessibilityLabel(title)
+    }
+}
+
 struct ToolPanel<Content: View>: View {
     let title: String
     let symbol: String
     // A figure for the whole panel, at the title's right.
-    var detail: String?
-    @ViewBuilder var content: Content
+    let detail: String?
+    let info: String?
+    let open: (() -> Void)?
+    let content: Content
+
+    init(title: String, symbol: String, detail: String? = nil, info: String? = nil,
+         open: (() -> Void)? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.symbol = symbol
+        self.detail = detail
+        self.info = info
+        self.open = open
+        self.content = content()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
-                Label(title, systemImage: symbol)
-                    .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
-                if let detail {
-                    Spacer(minLength: 8)
-                    Text(detail).font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
-                        .lineLimit(1)
+            HStack(spacing: 8) {
+                if let open {
+                    Button(action: open) { heading }
+                        .buttonStyle(.plain)
+                        .help("Open \(title)")
+                        .accessibilityLabel("Open \(title)")
+                } else {
+                    heading
+                }
+                if let info {
+                    InfoButton(info, label: "About \(title)")
                 }
             }
             .padding(.top, 12)
@@ -185,11 +253,31 @@ struct ToolPanel<Content: View>: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(detail.map { "\(title), \($0)" } ?? title)
     }
+
+    private var heading: some View {
+        HStack(spacing: 8) {
+            Label(title, systemImage: symbol)
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+            if let detail {
+                Text(detail).font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if open != nil {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
+        }
+        .contentShape(Rectangle())
+    }
 }
 
 extension ToolPanel {
-    init(group: ToolGroup, @ViewBuilder content: () -> Content) {
-        self.init(title: group.title, symbol: group.symbol, content: content)
+    init(group: ToolGroup, info: String? = nil, open: (() -> Void)? = nil, @ViewBuilder content: () -> Content) {
+        self.init(title: group.title, symbol: group.symbol, info: info, open: open, content: content)
     }
 }
 
@@ -205,13 +293,15 @@ struct DashboardView: View {
             sidebar
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text(model.page.title).font(.title2.weight(.semibold))
-                        .accessibilityAddTraits(.isHeader)
-                    page
-                    if let note = model.page.group?.quitNote {
-                        Text(note).font(.caption).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Text(model.page.title).font(.title2.weight(.semibold))
+                            .accessibilityAddTraits(.isHeader)
+                        if let group = model.page.group {
+                            InfoButton(group.quitNote, label: "When MacHelm quits")
+                        }
+                        Spacer()
                     }
+                    page
                 }
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -267,7 +357,9 @@ struct DashboardView: View {
         case .storage:
             StoragePage(storage: host.storage)
         case .startupServices:
-            ToolPanel(group: .startupServices) { StartupServicesGroup(store: host.startupServices) }
+            StartupServicesGroup(store: host.startupServices)
+                .padding(16)
+                .glassEffect(in: .rect(cornerRadius: 16))
         }
     }
 }
