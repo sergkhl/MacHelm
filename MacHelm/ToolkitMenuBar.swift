@@ -109,63 +109,56 @@ final class ToolkitMenuBar: NSObject, NSMenuDelegate {
     private func item(for entry: ToolkitMenuEntry) -> NSMenuItem {
         switch entry {
         case .openDashboard:
-            return action("Open MacHelm", #selector(showDashboard), symbol: "square.grid.2x2", key: "o")
+            return action("Open MacHelm", #selector(showDashboard), key: "o")
         case .separator:
             return .separator()
         case .fanControl(let on, let canToggle):
             // The toggle carries the state it was shown with. A row that went
             // stale under the open menu then does nothing, instead of the opposite.
-            let fanItem = action("Fan Control", #selector(toggleFanControl(_:)), symbol: "fan", checked: on, enabled: canToggle)
+            let fanItem = action("Fan Control", #selector(toggleFanControl(_:)), checked: on, enabled: canToggle)
             fanItem.representedObject = on
             fanItem.toolTip = host.cooling.subtitle
             fanItem.setAccessibilityLabel(on ? "Turn off fan control" : "Turn on fan control")
             return fanItem
         case .keepAwake(let on, let note):
             // Like the fan's entry, it carries the state it was shown with.
-            let entry = action("Keep Awake", #selector(toggleKeepAwake(_:)), symbol: "sun.max", checked: on)
+            let entry = action("Keep Awake", #selector(toggleKeepAwake(_:)), checked: on)
             entry.representedObject = on
             entry.subtitle = note
             entry.setAccessibilityLabel(on ? "Turn off Keep Awake" : "Turn on Keep Awake")
             return entry
         case .storage(let available):
             let space = available.map { "\($0.formatted(.byteCount(style: .file))) available" } ?? "Unavailable"
-            return action("Storage · \(space)", #selector(showStorage), symbol: "internaldrive")
+            return action("Storage · \(space)", #selector(showStorage))
         case .startupServices:
-            return action("Startup Services", #selector(showStartupServices), symbol: "power")
+            return action("Startup Services", #selector(showStartupServices))
         case .activity(let span):
-            let entry = action("Activity", #selector(showActivity), symbol: "waveform.path.ecg")
+            let entry = action("Activity", #selector(showActivity))
             let detail = span.map { "Heaviest by CPU, last \($0)" } ?? "Heaviest by CPU"
             entry.toolTip = detail
             entry.setAccessibilityLabel("Activity: \(detail)")
             return entry
         case .measuring:
-            let entry = action("Measuring…", nil, enabled: false)
-            entry.indentationLevel = 1
-            return entry
+            return action("Measuring…", nil, enabled: false)
         case .process(let process):
             // A click opens the Activity page. Nothing is quit from here: a slip would end an app.
             let row = action(process.value.isEmpty ? process.name : "\(process.name) — \(process.value)", #selector(showActivity),
-                             symbol: process.value.isEmpty ? nil : "app",
                              enabled: !process.value.isEmpty)
             row.subtitle = process.origin
-            row.indentationLevel = 1
             return row
         case .openAtLogin(let on):
-            return action("Open at Login", #selector(toggleOpenAtLogin), symbol: "person.crop.circle", checked: on)
+            return action("Open at Login", #selector(toggleOpenAtLogin), checked: on)
         case .quit:
-            return action("Quit", #selector(quit), symbol: "xmark.circle", key: "q")
+            return action("Quit", #selector(quit), key: "q")
         }
     }
 
-    private func action(_ title: String, _ selector: Selector?, symbol: String? = nil, key: String = "", checked: Bool = false,
+    // Rows carry no icons and no indentation. Build 2 gave them both, and on
+    // 2026-10-25 macOS 26.6.2 aborted the app when a row of the open menu kept
+    // asking for another layout pass; the rows had neither before.
+    private func action(_ title: String, _ selector: Selector?, key: String = "", checked: Bool = false,
                         enabled: Bool = true) -> NSMenuItem {
         let entry = NSMenuItem(title: title, action: selector, keyEquivalent: key)
-        if let symbol {
-            let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-            image?.isTemplate = true
-            image?.size = NSSize(width: 16, height: 16)
-            entry.image = image
-        }
         entry.target = self
         entry.state = checked ? .on : .off
         entry.isEnabled = enabled

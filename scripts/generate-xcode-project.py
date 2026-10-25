@@ -24,7 +24,7 @@ PROJECT_NAME = "MacHelm"
 PROJECT_PATH = Path("MacHelm.xcodeproj")
 BUNDLE_PREFIX = "io.github.sergkhl.MacHelm"
 VERSION = "0.1"
-BUILD = "2"
+BUILD = "3"
 APP_ENTITLEMENTS = "MacHelm/MacHelm.entitlements"
 
 
