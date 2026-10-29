@@ -184,7 +184,7 @@ struct FanHelperMain {
         do {
             let identity = try FanSigning.selfIdentity()
             if CommandLine.arguments.dropFirst() == ["--check-signing"] {
-                let policy = "manual-mode-acknowledgement=two-probes-1s; target-acknowledgement=two-probes-1s; release-acknowledgement=two-probes-1s; acknowledgement-final-pair=late; target-deadband=\(Int(FanHelperController.targetDeadbandRPM))rpm; sleep-allowance=\(Int(FanHelperController.sleepAllowanceSeconds))s; out-of-range-frame=skip-within-\(Int(FanSafetyGate.completeFrameLimitSeconds))s; unconfirmed-command=one-bounded-release-attempt"
+                let policy = "manual-mode-acknowledgement=two-probes-1s; target-acknowledgement=two-probes-1s; release-acknowledgement=two-probes-1s; acknowledgement-final-pair=late; target-deadband=\(Int(FanHelperController.targetDeadbandRPM))rpm; sleep-allowance=\(Int(FanHelperController.sleepAllowanceSeconds))s; out-of-range-frame=skip; complete-frame-limit=\(Int(FanSafetyGate.completeFrameLimitSeconds))s-while-holding; unconfirmed-command=one-bounded-release-attempt"
                 #if FAN_CONTROL_QUALIFICATION
                 print("FanControlHelper team=\(identity.team) cdhash=\(identity.hash); qualification=enabled; \(policy); no service registration or hardware access.")
                 #else
