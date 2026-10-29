@@ -47,6 +47,11 @@ final class FanControlService: ObservableObject {
     @Published private(set) var resumingAtLaunch = false
     // Why such a launch left Fan Control off. It stays until the next press.
     @Published private(set) var launchNote: String?
+    // G-Q2: why Fan Control last ended without the owner. It is saved, and
+    // stays until the next press or until Fan Control is on again.
+    @Published private(set) var stopNote: FanStopNote?
+    // When this run made the note, or read it at launch.
+    private var stopNoteMadeAt: TimeInterval?
 
     private let service = SMAppService.daemon(plistName: FanServiceIdentity.plist)
     private var connection: NSXPCConnection?
@@ -82,6 +87,7 @@ final class FanControlService: ObservableObject {
     private static let profileKey = "FanControlProfile"
     private static let menuBarReadoutKey = "FanControlMenuBarReadout"
     private static let rememberedKey = "FanControlRememberedOn"
+    private static let stopNoteKey = "FanControlStopNote"
     private static let handshakeMaximumAge: TimeInterval = 3
 
     private struct ProtocolHandshake {
@@ -104,6 +110,8 @@ final class FanControlService: ObservableObject {
         // M-Q3: on unless switched off in Settings.
         menuBarReadoutEnabled = UserDefaults.standard.object(forKey: Self.menuBarReadoutKey) as? Bool ?? true
         remembered = FanRememberedChoice(saved: UserDefaults.standard.bool(forKey: Self.rememberedKey))
+        stopNote = UserDefaults.standard.data(forKey: Self.stopNoteKey).flatMap { try? JSONDecoder().decode(FanStopNote.self, from: $0) }
+        if stopNote != nil { stopNoteMadeAt = ProcessInfo.processInfo.systemUptime }
         if remembered.on {
             // SR-Q2: the timer brings Fan Control back, by the rule that follows a wake.
             launchResume = FanLaunchResume(launchedAt: ProcessInfo.processInfo.systemUptime)
@@ -147,7 +155,8 @@ final class FanControlService: ObservableObject {
         if status.ownsOverride { return "Restoration needs attention" }
         guard helperApproved else { return "Set up helper to enable" }
         if resumingAtLaunch { return "Turning on as you left it…" }
-        return launchNote == nil ? "Off" : "Stayed off, see Cooling"
+        if launchNote != nil { return "Stayed off, see Cooling" }
+        return stopNote == nil ? "Off" : "Stopped by itself, see Cooling"
     }
 
     var recoveryRequired: Bool {
@@ -251,7 +260,7 @@ final class FanControlService: ObservableObject {
         if approved != helperApproved { helperApproved = approved }
         if !helperApproved {
             protocolReady = false
-            resumeAfterWake = false; wakeQualification.reset()
+            abandonWakeResume("its helper is not approved.")
         }
     }
 
@@ -288,6 +297,7 @@ final class FanControlService: ObservableObject {
         resumeAfterWake = false
         // A press replaces a pending launch resume and clears its note.
         launchResume = nil; launchNote = nil
+        clearStopNote()
         guard !recoveryRequired else {
             message = holdMessage
             return
@@ -324,6 +334,7 @@ final class FanControlService: ObservableObject {
                           !self.recoveryRequired, self.status.requestError == nil,
                           let session = self.status.sessionID else { self.enabled = false; self.beginning = false; return }
                     self.session = session; self.enabled = true; self.beginning = false
+                    self.clearStopNote()
                 }
             }
         } catch { transportFailed(error.localizedDescription) }
@@ -367,6 +378,7 @@ final class FanControlService: ObservableObject {
         guard !busy else { return }
         resumeAfterWake = false
         launchResume = nil; launchNote = nil
+        clearStopNote()
         guard !recoveryRequired else {
             message = "Resolve the recovery hold before removing the helper."
             return
@@ -537,6 +549,8 @@ final class FanControlService: ObservableObject {
             // its own recovery, is not brought back by the next launch.
             if !safe, let self, let changed = self.remembered.releaseAtQuitUnconfirmed() {
                 UserDefaults.standard.set(changed, forKey: Self.rememberedKey)
+                self.noteStop("Fan Control was on when MacHelm last quit, and the helper did not confirm its release then, so it did not come back at launch."
+                    + (self.message.map { " " + $0 } ?? ""))
             }
             completion()
         }
@@ -579,6 +593,7 @@ final class FanControlService: ObservableObject {
         if dashboardVisible && !helperApproved { refreshHelperStatus() }
         refreshMenuBarReadout()
         guard !sleeping else { return }
+        considerStopAnnouncement()
         if !helperProtocolReady {
             if protocolReady { protocolReady = false }
             // Ordinary sleep may age the handshake. Keep accepted wake intent,
@@ -595,7 +610,10 @@ final class FanControlService: ObservableObject {
                 proxy.renew(session: session) { [weak self] accepted in
                     Task { @MainActor in
                         guard let self, self.generation == requestGeneration, self.session == session else { return }
-                        if !accepted { self.transportFailed("The control lease ended. Resolve the reported fault and re-enable Fan Control.") }
+                        if !accepted {
+                            self.transportFailed("The control lease ended. Resolve the reported fault and re-enable Fan Control.",
+                                                 helperEnded: true)
+                        }
                     }
                 }
             } catch { transportFailed(error.localizedDescription) }
@@ -643,9 +661,9 @@ final class FanControlService: ObservableObject {
                         return
                     }
                     guard self.apply(data, requestGeneration: requestGeneration) else { return }
-                    guard self.status.requestError == nil else {
+                    if let refused = self.status.requestError {
                         self.protocolReady = false
-                        self.resumeAfterWake = false; self.wakeQualification.reset()
+                        self.abandonWakeResume(refused)
                         return
                     }
                     self.protocolHandshake = ProtocolHandshake(connectionGeneration: requestGeneration,
@@ -657,9 +675,11 @@ final class FanControlService: ObservableObject {
                     // qualified on subsequent timer ticks.
                     if self.enabled && self.status.sessionID != self.session {
                         self.enabled = false; self.session = nil; self.resumeAfterWake = false
+                        self.noteStop(self.status.reason ?? "The helper ended Fan Control.", awaitingHelper: true)
+                        self.refineStopNote()
                     }
                     if self.resumeAfterWake && [.unavailable, .restorationFailed, .externalRecoveryRequired].contains(self.status.mode) {
-                        self.resumeAfterWake = false; self.wakeQualification.reset()
+                        self.abandonWakeResume(self.status.reason ?? self.status.mode.title)
                     }
                 }
             }
@@ -741,6 +761,7 @@ final class FanControlService: ObservableObject {
         // Recovery fields cannot update GUI state until both protocol version
         // and the authenticated connection's service generation are checked.
         status = received
+        refineStopNote()
         if let snapshot = received.snapshot, let capabilities = received.capabilities {
             readoutFrame = (snapshot, capabilities)
         }
@@ -758,14 +779,19 @@ final class FanControlService: ObservableObject {
         return true
     }
 
-    private func transportFailed(_ reason: String) {
+    // `helperEnded`: the helper had already ended the session, so its own
+    // account of why may follow in a later status (G-Q2).
+    private func transportFailed(_ reason: String, helperEnded: Bool = false) {
         let failedOperation = operationFailure
+        let wasOn = enabled, wasResuming = resumeAfterWake
         enabled = false; session = nil; busy = false; resumeAfterWake = false; beginning = false
         operationToken = nil; operationFailure = nil; statusRequestAt = nil; statusRequestToken = nil
         message = reason
         status.mode = recoveryRequired ? .externalRecoveryRequired : (status.ownsOverride ? .restorationFailed : .unavailable)
         status.snapshot = nil; status.releaseVerified = false; status.safeToUnregister = false
         status.fanProbe = nil
+        if wasOn { noteStop(reason, awaitingHelper: helperEnded) }
+        else if wasResuming { noteStop(Self.wakeLead + reason) }
         invalidateConnection()
         // A helper that was removed or lost its approval shows as a lost connection.
         refreshHelperStatus()
@@ -799,7 +825,7 @@ final class FanControlService: ObservableObject {
         if recoveryRequired { resumeAfterWake = false; enabled = false; session = nil; return }
         if enabled || status.ownsOverride {
             release { [weak self] safe in
-                if !safe { self?.resumeAfterWake = false }
+                if !safe, let self { self.abandonWakeResume(self.message ?? "the release at sleep was not confirmed.") }
             }
         }
     }
@@ -839,6 +865,58 @@ final class FanControlService: ObservableObject {
                                               conflict: FanUtilityRegistry.runningConflict()) {
                 resumeAfterWake = false; enable()
             }
-        } catch { resumeAfterWake = false; message = error.localizedDescription }
+        } catch {
+            message = error.localizedDescription
+            abandonWakeResume(error.localizedDescription)
+        }
+    }
+
+    // G-Q2: Fan Control was on before sleep and does not come back.
+    private static let wakeLead = "It was on before sleep and could not come back: "
+    private func abandonWakeResume(_ reason: String) {
+        guard resumeAfterWake else { return }
+        resumeAfterWake = false; wakeQualification.reset()
+        noteStop(Self.wakeLead + reason)
+    }
+
+    private func noteStop(_ reason: String, awaitingHelper: Bool = false) {
+        stopNote = FanStopNote(reason: reason, at: Date(), awaitingHelper: awaitingHelper)
+        stopNoteMadeAt = ProcessInfo.processInfo.systemUptime
+        saveStopNote()
+    }
+
+    // The helper's account of an ending it made replaces the app's own.
+    private func refineStopNote() {
+        guard var note = stopNote, note.adopt(status) else { return }
+        stopNote = note; saveStopNote()
+    }
+
+    private func clearStopNote() {
+        alerts.withdrawStop()
+        guard stopNote != nil else { return }
+        stopNote = nil; stopNoteMadeAt = nil
+        saveStopNote()
+    }
+
+    private func saveStopNote() {
+        if let stopNote, let data = try? JSONEncoder().encode(stopNote) {
+            UserDefaults.standard.set(data, forKey: Self.stopNoteKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.stopNoteKey)
+        }
+    }
+
+    // Only a timer tick announces, once the helper has given its account or
+    // the wait for it is over. Holds, fans left in manual and the helper's own
+    // recovery have alerts of their own (Z-Q5, Z-Q7, Z-Q8), so a fresh status
+    // is waited for as well, for the same five seconds at most.
+    private func considerStopAnnouncement() {
+        guard var note = stopNote, !note.announced else { return }
+        let waited = stopNoteMadeAt.map { ProcessInfo.processInfo.systemUptime - $0 } ?? .infinity
+        guard helperProtocolReady || waited >= FanStopNote.helperWait else { return }
+        let post = note.announce(waited: waited, coveredElsewhere: needsAttention || status.selfRecoveryReceipt != nil)
+        guard note != stopNote else { return }
+        stopNote = note; saveStopNote()
+        if post { alerts.announceStop(note.reason) }
     }
 }

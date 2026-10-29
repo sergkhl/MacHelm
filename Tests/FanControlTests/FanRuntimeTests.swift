@@ -176,6 +176,7 @@ final class FanRuntimeTests: XCTestCase {
         XCTAssertThrowsError(try gate.begin(owner: "second", now: 0))
         XCTAssertFalse(gate.renew(owner: "second", session: session, now: 1))
         XCTAssertFalse(gate.renew(owner: "first", session: UUID().uuidString, now: 1))
+        gate.noteOverride(held: true, now: 1)
         gate.fresh(at: 2, now: 2)
         XCTAssertTrue(gate.renew(owner: "first", session: session, now: 2))
         XCTAssertNil(gate.check(now: 5.99).reason)
@@ -193,6 +194,7 @@ final class FanRuntimeTests: XCTestCase {
     func testCompleteFrameLimitIsFourSeconds() throws {
         let gate = FanSafetyGate()
         let session = try gate.begin(owner: "owner", now: 0)
+        gate.noteOverride(held: true, now: 0)
         XCTAssertEqual(gate.nextDeadline(now: 0), 4)
         XCTAssertNil(gate.check(now: 3.99).reason)
         gate.fresh(at: 1, now: 3.99)
@@ -202,6 +204,36 @@ final class FanRuntimeTests: XCTestCase {
         XCTAssertEqual(gate.nextDeadline(now: 4.5), 5)
         XCTAssertNil(gate.check(now: 4.99).reason)
         XCTAssertEqual(gate.check(now: 5).reason, "No complete fresh sensor snapshot for four seconds.")
+    }
+
+    // G-Q1: while no override is held the complete-frame limit does not end
+    // the session; the lease still does. Holding one applies the limit at
+    // once, and keeps the generation unless that ends the session.
+    func testCompleteFrameLimitAppliesOnlyWhileAnOverrideIsHeld() throws {
+        let gate = FanSafetyGate()
+        let session = try gate.begin(owner: "owner", now: 0)
+        XCTAssertEqual(gate.nextDeadline(now: 0), 5)
+        XCTAssertTrue(gate.renew(owner: "owner", session: session, now: 4))
+        XCTAssertNil(gate.check(now: 8.99).reason, "Watching outlasts the complete-frame limit.")
+        gate.fresh(at: 8, now: 8.99)
+        let watching = gate.check(now: 8.99).generation
+        gate.noteOverride(held: true, now: 8.99)
+        XCTAssertTrue(gate.permits(watching, now: 8.99))
+        XCTAssertTrue(gate.renew(owner: "owner", session: session, now: 8.99))
+        XCTAssertEqual(gate.nextDeadline(now: 8.99), 12)
+        gate.noteOverride(held: false, now: 11)
+        XCTAssertEqual(gate.nextDeadline(now: 11), 13.99)
+        XCTAssertNil(gate.check(now: 13).reason, "A released session watches again.")
+        XCTAssertEqual(gate.check(now: 13.99).reason, "The app lease expired after five seconds.")
+
+        // An override is never taken on a stale frame.
+        gate.finish()
+        let next = try gate.begin(owner: "owner", now: 20)
+        XCTAssertTrue(gate.renew(owner: "owner", session: next, now: 24))
+        let stale = gate.check(now: 25).generation
+        gate.noteOverride(held: true, now: 25)
+        XCTAssertFalse(gate.permits(stale, now: 25))
+        XCTAssertEqual(gate.check(now: 25).reason, "No complete fresh sensor snapshot for four seconds.")
     }
 
     func testProfileRevisionAndDisconnectCancelObsoleteCommands() throws {
@@ -1357,6 +1389,41 @@ final class FanRuntimeTests: XCTestCase {
                 XCTAssertNil(journal.record)
             }
         }
+    }
+
+    // G-Q1: a session that only watches rides out any run of unusable frames,
+    // and acts on the next usable one. Once control is released inside the
+    // session, it watches again and rides out the next run as well.
+    func testWatchingSessionRidesOutUnusableFramesPastTheFourSecondLimit() throws {
+        let clock = TestClock(), fans = FakeFans(clock: clock), journal = MemoryJournal()
+        fans.temperature = 60
+        let controller = try controller(fans, journal: journal)
+        let session = try XCTUnwrap(begin(controller).sessionID)
+        func second(_ note: String) {
+            clock.now += 1
+            controller.checkWatchdog()
+            XCTAssertTrue(controller.renew(owner: "owner", session: session), note)
+            poll(controller)
+            XCTAssertEqual(controller.status(observe: false).sessionID, session, note)
+        }
+        fans.invalidMaximumReads = 8
+        for time in 1...8 { second("watching, unusable frame \(time)") }
+        XCTAssertTrue(fans.operations.isEmpty, "Watching writes nothing.")
+        XCTAssertEqual(controller.status(observe: false).mode, .automatic)
+        XCTAssertNil(journal.record)
+        fans.temperature = 75
+        for time in 1...10 { second("control, usable frame \(time)") }
+        XCTAssertEqual(controller.status(observe: false).mode, .custom)
+        XCTAssertNotNil(journal.record)
+        fans.temperature = 60
+        for time in 1...15 { second("cooling, usable frame \(time)") }
+        XCTAssertEqual(controller.status(observe: false).mode, .automatic)
+        XCTAssertNil(journal.record); XCTAssertTrue(fans.observation.isFullyAutomatic)
+        let released = fans.operations.count
+        fans.invalidMaximumReads = 8
+        for time in 1...8 { second("watching again, unusable frame \(time)") }
+        XCTAssertEqual(fans.operations.count, released, "Watching again writes nothing.")
+        XCTAssertNil(journal.record)
     }
 
     // Frame validation reports a range fault only when everything else in the

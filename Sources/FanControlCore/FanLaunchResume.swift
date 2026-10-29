@@ -34,6 +34,47 @@ public struct FanRememberedChoice: Equatable {
     }
 }
 
+// G-Q2 (owner, 2026-10-29): when Fan Control ends without the owner turning
+// it off, the app keeps why and when, shows it until the next press, and
+// announces it once. It is kept across launches, because the owner may look
+// days later. An ending the helper made is told in the helper's words: the
+// app's own account stands until a status gives the reason control ended,
+// or for five seconds at most.
+public struct FanStopNote: Codable, Equatable {
+    public static let helperWait: TimeInterval = 5
+
+    public private(set) var reason: String
+    public let at: Date
+    public private(set) var announced = false
+    // Not saved: after a relaunch the helper's account may be gone.
+    public private(set) var awaitingHelper = false
+
+    private enum CodingKeys: String, CodingKey { case reason, at, announced }
+
+    public init(reason: String, at: Date, awaitingHelper: Bool) {
+        self.reason = reason; self.at = at; self.awaitingHelper = awaitingHelper
+    }
+
+    // A helper with no session, paused or still holding fans it could not
+    // restore, gives the reason its control ended. Returns whether it did.
+    public mutating func adopt(_ status: FanStatus) -> Bool {
+        guard awaitingHelper, status.sessionID == nil, [.paused, .restorationFailed].contains(status.mode),
+              let reason = status.reason, !reason.isEmpty else { return false }
+        self.reason = reason; awaitingHelper = false
+        return true
+    }
+
+    // Whether to post the alert now, `waited` seconds after the note was made
+    // in this run. It is announced once. An ending that has an alert of its
+    // own (a hold, fans left in manual, the helper's own recovery) is marked
+    // announced without a second one.
+    public mutating func announce(waited: TimeInterval, coveredElsewhere: Bool) -> Bool {
+        guard !announced, !awaitingHelper || waited >= Self.helperWait else { return false }
+        announced = true
+        return !coveredElsewhere
+    }
+}
+
 // SR-Q2 (owner, 2026-10-11): with on saved, a launch brings Fan Control back
 // by the rule that follows a wake: three healthy readings in a row, every fan
 // automatic, no hold and no other fan utility.

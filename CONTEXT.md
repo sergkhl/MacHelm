@@ -28,7 +28,11 @@ These terms connect the interface, shared code, and documentation. The design ra
 
 **Start temperature** is the profile's lower threshold: **Start** under Temperatures on the Cooling page, 70 °C by default. Fan Control takes the fans when the smoothed CPU die average reaches it, and keeps them until the average has stayed below it for ten seconds. There is no separate release temperature. **Maximum**, 85 °C by default, is where demand reaches its maximum.
 
-**Release** gives MacHelm's fans back to Apple's automatic control. Each fan MacHelm set to manual mode is set back to automatic, and nothing else is written. It follows ten seconds below the start temperature. It happens at once when Fan Control is turned off, and on quit, sleep, a lost connection or an expired lease.
+**Release** gives MacHelm's fans back to Apple's automatic control. Each fan MacHelm set to manual mode is set back to automatic, and nothing else is written. It follows ten seconds below the start temperature. It happens at once when Fan Control is turned off, and on quit, sleep, a lost connection, an expired lease or four seconds without a usable reading.
+
+**Watching** is Fan Control on while MacHelm holds no fans: below the start temperature, or after a release that did not end it. It writes nothing and waits for the next usable reading, however long the readings stay unusable. See [ADR 0011](docs/adr/0011-watch-through-a-sensor-gap-and-say-why-fan-control-stopped.md).
+
+**Stopped by itself** means Fan Control ended without the owner turning it off, and so stays off until turned on again. MacHelm keeps why and when, across launches, shows it on the Cooling page until the next press, and announces it once in a macOS notification.
 
 **Recovery hold** follows a fan command the helper could not confirm. Fan Control, saving temperatures and helper removal stay locked, and a fan may be left as that command left it. The helper makes one attempt by itself to return its own fans to automatic, unless the fans changed in a way it cannot explain. **Restore automatic now** and **Verify external recovery** on the Cooling page also end a hold. A hold raises a macOS notification and a warning sign on the menu bar item. See [Fan Control](docs/fan-control.md) and [ADR 0009](docs/adr/0009-release-by-mode-and-recover-an-unpredicted-entry.md).
 

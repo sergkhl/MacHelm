@@ -109,7 +109,9 @@ struct CoolingPage: View {
             if service.status.mode.title != service.subtitle {
                 Text(service.status.mode.title).font(.subheadline.weight(.semibold))
             }
-            if let reason = service.message ?? service.status.reason {
+            // G-Q2: the note says it once, with when.
+            let stopped = service.enabled ? nil : service.stopNote
+            if let reason = service.message ?? service.status.reason, reason != stopped?.reason {
                 Text(reason).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("fan-control-reason")
@@ -118,6 +120,12 @@ struct CoolingPage: View {
                 Text(note).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("fan-control-launch-note")
+            }
+            if let stopped {
+                Text("Stopped by itself on \(stopped.at.formatted(.dateTime.day().month(.abbreviated).hour().minute())). \(stopped.reason)")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("fan-control-stop-note")
             }
             if service.helperApproved && !service.helperProtocolReady {
                 Text("Fan controls are locked until the connected helper passes its compatibility check.")

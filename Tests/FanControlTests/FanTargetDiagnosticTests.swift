@@ -545,6 +545,7 @@ final class FanTargetDiagnosticTests: XCTestCase {
             // Change 5: with no frame since a begin at 96.25, the four-second
             // complete-frame window ends at 100.25. Change 6: the lease ends at 100.2.
             let session = try gate.begin(owner: "owner", now: change == 6 ? 95.2 : (change == 5 ? 96.25 : 100))
+            gate.noteOverride(held: true, now: change == 6 ? 95.2 : (change == 5 ? 96.25 : 100)) // G-Q1
             if change == 6 { gate.fresh(at: 98, now: 98) } else if change != 5 { gate.fresh(at: 100, now: 100) }
             let token = gate.check(now: 100).generation
             let fans = TargetFans(), journal = TargetJournal()

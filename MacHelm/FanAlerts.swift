@@ -12,6 +12,10 @@ import UserNotifications
 // an earlier run are withdrawn at the first status. A restoration the helper
 // could not complete while it owns an override is not a hold, but a fan may
 // be left in manual mode too; it is announced once it has lasted ten seconds.
+//
+// G-Q2: Fan Control ending without the owner is announced once as well. The
+// service decides when; the alert is withdrawn at the next press or once Fan
+// Control is on again, also when that comes in a later run.
 @MainActor
 final class FanAlerts: NSObject, UNUserNotificationCenterDelegate {
     // Created before launch finishes, so a click that launches MacHelm reaches it.
@@ -28,7 +32,9 @@ final class FanAlerts: NSObject, UNUserNotificationCenterDelegate {
     private var stuckSince: TimeInterval?
     private var stuckAnnounced = false
     private static let holdPrefix = "fan-hold-", recoveredPrefix = "fan-recovered-", stuckID = "fan-not-restored"
+    private static let stoppedID = "fan-stopped"
     private static let holdKey = "FanAlertsAnnouncedHold", recoveryKey = "FanAlertsAnnouncedRecovery"
+    private static let stoppedKey = "FanAlertsAnnouncedStop"
     private var announcedHold: String? {
         get { UserDefaults.standard.string(forKey: Self.holdKey) }
         set { UserDefaults.standard.set(newValue, forKey: Self.holdKey) }
@@ -36,6 +42,10 @@ final class FanAlerts: NSObject, UNUserNotificationCenterDelegate {
     private var announcedRecovery: String? {
         get { UserDefaults.standard.string(forKey: Self.recoveryKey) }
         set { UserDefaults.standard.set(newValue, forKey: Self.recoveryKey) }
+    }
+    private var announcedStop: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.stoppedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.stoppedKey) }
     }
 
     private override init() {
@@ -96,12 +106,24 @@ final class FanAlerts: NSObject, UNUserNotificationCenterDelegate {
         if !cleanedUp {
             cleanedUp = true
             let current = Set([announcedHold.map { Self.holdPrefix + $0 }, announcedRecovery.map { Self.recoveredPrefix + $0 },
-                               stuckAnnounced ? Self.stuckID : nil].compactMap { $0 })
+                               stuckAnnounced ? Self.stuckID : nil, announcedStop ? Self.stoppedID : nil].compactMap { $0 })
             UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
                 let stale = delivered.map(\.request.identifier).filter { $0.hasPrefix("fan-") && !current.contains($0) }
                 if !stale.isEmpty { UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: stale) }
             }
         }
+    }
+
+    func announceStop(_ reason: String) {
+        announcedStop = true
+        let said = reason.hasSuffix(".") ? reason : reason + "."
+        post(Self.stoppedID, title: "Fan Control stopped", body: "\(said) Turn it on again on the Cooling page.")
+    }
+
+    func withdrawStop() {
+        guard announcedStop else { return }
+        announcedStop = false
+        withdraw(Self.stoppedID)
     }
 
     private func post(_ id: String, title: String, body: String) {

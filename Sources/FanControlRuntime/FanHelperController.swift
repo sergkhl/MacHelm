@@ -503,7 +503,8 @@ public final class FanHelperController {
                 // unusable: no decision or write follows and nothing is
                 // substituted, clamped or kept for control. The last usable
                 // frame stays visible until it is three seconds old, and the
-                // complete-frame deadline keeps running from it. Its fan state
+                // complete-frame deadline keeps running from it; it ends the
+                // session only while an override is held (G-Q1). Its fan state
                 // must still match this helper's ownership.
                 do {
                     try requireOwnedFanState(hardware.readControlState(capabilities))
@@ -619,6 +620,12 @@ public final class FanHelperController {
             return expiry - now >= seconds
         }
         if actuator.record == nil {
+            // G-Q1: from the first durable intent on, the complete-frame
+            // limit ends the session again. The frame behind this decision
+            // is fresh, so the check can only fail if time has run out.
+            safety.noteOverride(held: true, now: clock())
+            armWatchdog()
+            guard !revoked() else { throw FanControlError.cancelled }
             try actuator.establish(session: session, capabilities: capabilities, baseline: frame.controlObservation)
             update { $0.ownsOverride = true; $0.releaseVerified = false }
         }
@@ -776,6 +783,8 @@ public final class FanHelperController {
             publishReleaseTrace(previous: previousTrace)
             if wasOwned { log("Automatic restoration readback confirmed at \(clock()).") }
             if endingSession { activationReady = false; safety.finish() }
+            // G-Q1: a session that goes on after its release only watches.
+            else { safety.noteOverride(held: actuator.record != nil, now: clock()) }
             armWatchdog()
             update {
                 $0.ownsOverride = false; $0.requestedRPM = [:]

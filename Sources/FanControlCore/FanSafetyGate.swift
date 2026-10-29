@@ -14,11 +14,15 @@ public final class FanSafetyGate {
     private var recoveryOwner: String?
     private var recoveryCommitting = false
     private var sleeping = false
+    // G-Q1 (owner, 2026-10-29): whether the helper holds an override in this
+    // session. A session that only watches has nothing to release, so the
+    // complete-frame limit does not end it; the lease still does.
+    private var overrideHeld = false
 
-    // The longest a session lasts without a complete usable frame (H-Q4).
-    // Frames come one second apart, so two unusable frames in a row are
-    // ridden out and a third ends the session. A frame's own freshness stays
-    // three seconds (FanSnapshot.validate).
+    // The longest a session holding an override lasts without a complete
+    // usable frame (H-Q4). Frames come one second apart, so two unusable
+    // frames in a row are ridden out and a third ends the session. A frame's
+    // own freshness stays three seconds (FanSnapshot.validate).
     public static let completeFrameLimitSeconds: TimeInterval = 4
 
     public init() {}
@@ -30,8 +34,19 @@ public final class FanSafetyGate {
         self.owner = owner
         let id = UUID().uuidString
         session = id; leaseDeadline = now + 5; telemetryDeadline = now + Self.completeFrameLimitSeconds
-        stopReason = nil; generation &+= 1
+        stopReason = nil; overrideHeld = false; generation &+= 1
         return id
+    }
+
+    // G-Q1: called before the durable intent of a session's first write, and
+    // after a release inside the session is confirmed. Holding checks the
+    // complete-frame limit at once, so an entry never follows a stale frame.
+    // The generation is unchanged unless that check stops the session.
+    public func noteOverride(held: Bool, now: TimeInterval) {
+        lock.lock(); defer { lock.unlock() }
+        guard owner != nil else { return }
+        overrideHeld = held
+        expire(now: now)
     }
 
     public func renew(owner: String, session: String, now: TimeInterval) -> Bool {
@@ -110,7 +125,7 @@ public final class FanSafetyGate {
         lock.lock(); defer { lock.unlock() }
         expire(now: now)
         guard owner != nil, stopReason == nil else { return nil }
-        return min(leaseDeadline, telemetryDeadline)
+        return overrideHeld ? min(leaseDeadline, telemetryDeadline) : leaseDeadline
     }
 
     public func permits(_ expectedGeneration: UInt64, now: TimeInterval) -> Bool {
@@ -148,7 +163,7 @@ public final class FanSafetyGate {
 
     public func finish() {
         lock.lock(); defer { lock.unlock() }
-        owner = nil; session = nil; stopReason = nil; generation &+= 1
+        owner = nil; session = nil; stopReason = nil; overrideHeld = false; generation &+= 1
     }
 
     public func holdForExternalRecovery() {
@@ -156,7 +171,7 @@ public final class FanSafetyGate {
         // Polling an existing hold must not revoke an explicit verification.
         guard recoveryOwner == nil else { return }
         guard owner != nil || session != nil || stopReason != nil || removalOwner != nil else { return }
-        owner = nil; session = nil; stopReason = nil; removalOwner = nil
+        owner = nil; session = nil; stopReason = nil; removalOwner = nil; overrideHeld = false
         generation &+= 1
     }
 
@@ -200,7 +215,7 @@ public final class FanSafetyGate {
     private func expire(now: TimeInterval) {
         guard owner != nil, stopReason == nil else { return }
         if now >= leaseDeadline { stopReason = "The app lease expired after five seconds." }
-        else if now >= telemetryDeadline { stopReason = "No complete fresh sensor snapshot for four seconds." }
+        else if overrideHeld && now >= telemetryDeadline { stopReason = "No complete fresh sensor snapshot for four seconds." }
         if stopReason != nil { generation &+= 1 }
     }
 }

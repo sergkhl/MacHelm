@@ -275,3 +275,68 @@ final class FanLaunchResumeTests: XCTestCase {
         assertStaysOff(consider(&never, status(frameAt: 101), now: 130), containing: "healthy")
     }
 }
+
+// G-Q2 (owner, 2026-10-29): why Fan Control ended without the owner is kept,
+// told in the helper's words when the helper ended it, and announced once.
+final class FanStopNoteTests: XCTestCase {
+    private func status(_ mode: FanOperatingMode, reason: String?, session: String? = nil) -> FanStatus {
+        var status = FanStatus(serviceGeneration: "stop-note-test")
+        status.mode = mode; status.reason = reason; status.sessionID = session
+        return status
+    }
+
+    func testTheHelpersAccountOfAnEndingReplacesTheAppsOwn() {
+        var note = FanStopNote(reason: "The control lease ended.", at: Date(), awaitingHelper: true)
+        XCTAssertFalse(note.adopt(status(.paused, reason: "Too early.", session: UUID().uuidString)))
+        XCTAssertFalse(note.adopt(status(.unavailable, reason: "An idle fault label.")))
+        XCTAssertFalse(note.adopt(status(.paused, reason: nil)))
+        XCTAssertEqual(note.reason, "The control lease ended.")
+        XCTAssertTrue(note.adopt(status(.paused, reason: "No complete fresh sensor snapshot for four seconds.")))
+        XCTAssertEqual(note.reason, "No complete fresh sensor snapshot for four seconds.")
+        XCTAssertFalse(note.awaitingHelper)
+        // Only the first account counts; a later ending is a later note.
+        XCTAssertFalse(note.adopt(status(.paused, reason: "Fan Control was turned off by the app.")))
+        XCTAssertEqual(note.reason, "No complete fresh sensor snapshot for four seconds.")
+
+        var stuck = FanStopNote(reason: "The control lease ended.", at: Date(), awaitingHelper: true)
+        XCTAssertTrue(stuck.adopt(status(.restorationFailed, reason: "Fan mode or target changed unexpectedly; ownership was lost.")))
+        XCTAssertEqual(stuck.reason, "Fan mode or target changed unexpectedly; ownership was lost.")
+    }
+
+    func testAnAppAccountIsNotReplaced() {
+        var note = FanStopNote(reason: "Fan helper disconnected.", at: Date(), awaitingHelper: false)
+        XCTAssertFalse(note.adopt(status(.paused, reason: "The authenticated app connection was lost.")))
+        XCTAssertEqual(note.reason, "Fan helper disconnected.")
+    }
+
+    func testAnEndingTheHelperMadeIsAnnouncedOnceItsAccountCameOrAfterFiveSeconds() {
+        var waiting = FanStopNote(reason: "The control lease ended.", at: Date(), awaitingHelper: true)
+        XCTAssertFalse(waiting.announce(waited: 4.9, coveredElsewhere: false))
+        XCTAssertFalse(waiting.announced)
+        XCTAssertTrue(waiting.announce(waited: 5, coveredElsewhere: false))
+        XCTAssertTrue(waiting.announced)
+        XCTAssertFalse(waiting.announce(waited: 6, coveredElsewhere: false))
+
+        var told = FanStopNote(reason: "The control lease ended.", at: Date(), awaitingHelper: true)
+        XCTAssertTrue(told.adopt(status(.paused, reason: "The app lease expired after five seconds.")))
+        XCTAssertTrue(told.announce(waited: 1, coveredElsewhere: false))
+    }
+
+    func testAnEndingWithAnAlertOfItsOwnIsMarkedWithoutASecondOne() {
+        var note = FanStopNote(reason: "Fan helper disconnected.", at: Date(), awaitingHelper: false)
+        XCTAssertFalse(note.announce(waited: 0, coveredElsewhere: true))
+        XCTAssertTrue(note.announced)
+        XCTAssertFalse(note.announce(waited: 10, coveredElsewhere: false))
+    }
+
+    func testASavedNoteKeepsItsReasonTimeAndAnnouncementButNotTheWait() throws {
+        let at = Date(timeIntervalSince1970: 1_793_143_405)
+        var note = FanStopNote(reason: "The control lease ended.", at: at, awaitingHelper: true)
+        let saved = try JSONDecoder().decode(FanStopNote.self, from: JSONEncoder().encode(note))
+        XCTAssertEqual(saved.reason, "The control lease ended."); XCTAssertEqual(saved.at, at)
+        XCTAssertFalse(saved.awaitingHelper, "A later run may no longer have the helper's account.")
+        XCTAssertFalse(saved.announced)
+        XCTAssertTrue(note.announce(waited: 5, coveredElsewhere: false))
+        XCTAssertTrue(try JSONDecoder().decode(FanStopNote.self, from: JSONEncoder().encode(note)).announced)
+    }
+}

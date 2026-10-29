@@ -268,6 +268,7 @@ final class FanModeDiagnosticTests: XCTestCase {
         for lease in [false, true] {
             let fans = DiagnosticFans(), journal = DiagnosticJournal(), gate = FanSafetyGate()
             _ = try gate.begin(owner: "owner", now: 100)
+            gate.noteOverride(held: true, now: 100) // As before an entry's durable intent (G-Q1).
             if lease {
                 gate.fresh(at: 102, now: 102)
                 fans.clock.now = 104.6
@@ -1069,6 +1070,7 @@ final class FanManualAcknowledgementStoreTests: XCTestCase {
             // Change 6: with no frame since a begin at 96.15, the four-second
             // complete-frame window ends at 100.15. Change 7: the lease ends at 100.2.
             let session = try gate.begin(owner: "owner", now: change == 7 ? 95.2 : (change == 6 ? 96.15 : 100))
+            gate.noteOverride(held: true, now: change == 7 ? 95.2 : (change == 6 ? 96.15 : 100)) // G-Q1
             if change == 7 {
                 gate.fresh(at: 97, now: 97); gate.fresh(at: 98.5, now: 98.5)
             } else if change != 6 { gate.fresh(at: 100, now: 100) }
