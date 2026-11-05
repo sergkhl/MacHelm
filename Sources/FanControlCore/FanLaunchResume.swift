@@ -75,6 +75,49 @@ public struct FanStopNote: Codable, Equatable {
     }
 }
 
+// G-Q3 (owner, 2026-11-05): a status reply older than three seconds authorizes
+// nothing, but one such reply does not end Fan Control. The app or the helper
+// only paused, and the connection and the session may still be good, so the
+// reply is dropped and the app asks again at once. Fan controls stay locked
+// until a usable reply comes. The helper's five-second lease still ends a
+// session the app could not renew in time.
+public struct FanStatusWait {
+    // How old a status may be and still authorize fan controls.
+    public static let maximumAge: TimeInterval = 3
+    // Longer than the lease, so waiting never ends a session the helper could
+    // still keep.
+    public static let answerLimit: TimeInterval = 6
+
+    public enum Reply: Equatable {
+        case usable
+        case askAgain
+        // Two late replies in a row mean at least six seconds without a usable
+        // status, which is also longer than the lease.
+        case giveUp
+    }
+
+    private var lateInARow = 0
+
+    public init() {}
+
+    public mutating func reply(requestedAt: TimeInterval, now: TimeInterval) -> Reply {
+        let age = now - requestedAt
+        guard age >= 0, age < Self.maximumAge else {
+            lateInARow += 1
+            return lateInARow > 1 ? .giveUp : .askAgain
+        }
+        lateInARow = 0
+        return .usable
+    }
+
+    // A request that is still unanswered at this point ends the connection.
+    public func overdue(requestedAt: TimeInterval, now: TimeInterval) -> Bool {
+        now - requestedAt >= Self.answerLimit
+    }
+
+    public mutating func reset() { lateInARow = 0 }
+}
+
 // SR-Q2 (owner, 2026-10-11): with on saved, a launch brings Fan Control back
 // by the rule that follows a wake: three healthy readings in a row, every fan
 // automatic, no hold and no other fan utility.

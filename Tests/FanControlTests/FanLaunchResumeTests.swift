@@ -276,6 +276,55 @@ final class FanLaunchResumeTests: XCTestCase {
     }
 }
 
+// G-Q3 (owner, 2026-11-05): on 2026-11-03 one status reply older than three
+// seconds ended Fan Control, and it stayed off until turned on again.
+final class FanStatusWaitTests: XCTestCase {
+    func testOneLateReplyIsDroppedAndAskedAgainInsteadOfEndingFanControl() {
+        var wait = FanStatusWait()
+        XCTAssertEqual(wait.reply(requestedAt: 100, now: 102.9), .usable)
+        XCTAssertEqual(wait.reply(requestedAt: 103, now: 106), .askAgain)
+        XCTAssertEqual(wait.reply(requestedAt: 106, now: 106.1), .usable)
+    }
+
+    func testASecondLateReplyInARowGivesUp() {
+        var wait = FanStatusWait()
+        XCTAssertEqual(wait.reply(requestedAt: 100, now: 103), .askAgain)
+        XCTAssertEqual(wait.reply(requestedAt: 103, now: 106), .giveUp)
+    }
+
+    func testAUsableReplyOrANewConnectionStartsTheCountAgain() {
+        var usable = FanStatusWait()
+        XCTAssertEqual(usable.reply(requestedAt: 100, now: 103), .askAgain)
+        XCTAssertEqual(usable.reply(requestedAt: 103, now: 103.1), .usable)
+        XCTAssertEqual(usable.reply(requestedAt: 104, now: 107), .askAgain)
+
+        var reconnected = FanStatusWait()
+        XCTAssertEqual(reconnected.reply(requestedAt: 100, now: 103), .askAgain)
+        reconnected.reset()
+        XCTAssertEqual(reconnected.reply(requestedAt: 103, now: 106), .askAgain)
+    }
+
+    func testAReplyFromTheFutureAuthorizesNothing() {
+        var wait = FanStatusWait()
+        XCTAssertEqual(wait.reply(requestedAt: 100, now: 99), .askAgain)
+    }
+
+    // The app must not give up while the helper could still keep the session.
+    func testNoReplyIsWaitedForUntilAfterTheLeaseHasRunOut() throws {
+        let wait = FanStatusWait()
+        let keeping = FanSafetyGate()
+        let kept = try keeping.begin(owner: "app", now: 100)
+        XCTAssertTrue(keeping.renew(owner: "app", session: kept, now: 104.9))
+        XCTAssertFalse(wait.overdue(requestedAt: 100, now: 104.9))
+
+        let losing = FanSafetyGate()
+        let lost = try losing.begin(owner: "app", now: 100)
+        XCTAssertFalse(losing.renew(owner: "app", session: lost, now: 105))
+        XCTAssertFalse(wait.overdue(requestedAt: 100, now: 105.9))
+        XCTAssertTrue(wait.overdue(requestedAt: 100, now: 106))
+    }
+}
+
 // G-Q2 (owner, 2026-10-29): why Fan Control ended without the owner is kept,
 // told in the helper's words when the helper ended it, and announced once.
 final class FanStopNoteTests: XCTestCase {

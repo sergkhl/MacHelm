@@ -22,6 +22,8 @@ The enabled setting is remembered. At launch or after wake, resumption requires 
 
 Any other ending saves off, so Fan Control stays off until turned on again. These include the helper ending the session, a failed connection, a wake that does not bring Fan Control back, and a release at quit the helper did not confirm. MacHelm then keeps why and when, also across launches. The Overview reads "Stopped by itself, see Cooling", and the Cooling page gives the time and the reason until the next press. When the helper ended the session, the reason is the helper's own, once a status gives it.
 
+A status reply older than three seconds authorizes nothing, but one such reply does not end Fan Control. MacHelm drops it and asks again at once, and fan controls stay locked until a usable reply comes. A second late reply in a row, or no reply to a request for six seconds, counts as a failed connection. A pause of five seconds or more still ends the session on the helper's lease. Until 2026-11-05 a single late reply ended Fan Control ([ADR 0012](adr/0012-a-late-status-reply-does-not-end-fan-control.md)).
+
 ## Ownership and recovery
 
 One authenticated XPC connection owns a control session. Another client cannot renew, update, or stop it. The interface accepts validated profiles and session/recovery identifiers; it does not accept arbitrary SMC keys, commands, sensor values, or target speeds. App and helper must agree on protocol version 4. Protocol and recovery-record versions are independent of the app's 0.1 version.

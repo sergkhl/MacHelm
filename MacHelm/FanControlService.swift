@@ -79,6 +79,7 @@ final class FanControlService: ObservableObject {
     private var generation = UUID()
     private var statusRequestAt: TimeInterval?
     private var statusRequestToken: UUID?
+    private var statusWait = FanStatusWait()
     private var protocolHandshake: ProtocolHandshake?
     private var operationToken: UUID?
     private var operationFailure: (() -> Void)?
@@ -88,7 +89,6 @@ final class FanControlService: ObservableObject {
     private static let menuBarReadoutKey = "FanControlMenuBarReadout"
     private static let rememberedKey = "FanControlRememberedOn"
     private static let stopNoteKey = "FanControlStopNote"
-    private static let handshakeMaximumAge: TimeInterval = 3
 
     private struct ProtocolHandshake {
         let connectionGeneration: UUID
@@ -173,7 +173,7 @@ final class FanControlService: ObservableObject {
               let handshake = protocolHandshake else { return false }
         let age = ProcessInfo.processInfo.systemUptime - handshake.requestedAt
         return handshake.connectionGeneration == generation && handshake.serviceGeneration == status.serviceGeneration
-            && age >= 0 && age < Self.handshakeMaximumAge
+            && age >= 0 && age < FanStatusWait.maximumAge
     }
 
     var canMutateHelper: Bool { helperProtocolReady && !busy && !sleeping }
@@ -603,21 +603,7 @@ final class FanControlService: ObservableObject {
             considerLaunchResumption()
             return
         }
-        if helperProtocolReady, !recoveryRequired, let session {
-            do {
-                let proxy = try mutatingRemote()
-                let requestGeneration = generation
-                proxy.renew(session: session) { [weak self] accepted in
-                    Task { @MainActor in
-                        guard let self, self.generation == requestGeneration, self.session == session else { return }
-                        if !accepted {
-                            self.transportFailed("The control lease ended. Resolve the reported fault and re-enable Fan Control.",
-                                                 helperEnded: true)
-                        }
-                    }
-                }
-            } catch { transportFailed(error.localizedDescription) }
-        }
+        renewLease()
         // Idle checks use observe:false. They establish/refresh compatibility
         // without requesting native control or extending a control lease.
         if helperApproved { requestStatus() }
@@ -625,6 +611,23 @@ final class FanControlService: ObservableObject {
         // callback itself never enables Fan Control.
         considerWakeResumption()
         considerLaunchResumption()
+    }
+
+    private func renewLease() {
+        guard helperProtocolReady, !sleeping, !recoveryRequired, let session else { return }
+        do {
+            let proxy = try mutatingRemote()
+            let requestGeneration = generation
+            proxy.renew(session: session) { [weak self] accepted in
+                Task { @MainActor in
+                    guard let self, self.generation == requestGeneration, self.session == session else { return }
+                    if !accepted {
+                        self.transportFailed("The control lease ended. Resolve the reported fault and re-enable Fan Control.",
+                                             helperEnded: true)
+                    }
+                }
+            }
+        } catch { transportFailed(error.localizedDescription) }
     }
 
     private func requestProtocolCheck() {
@@ -639,7 +642,7 @@ final class FanControlService: ObservableObject {
         guard helperApproved, !sleeping else { return }
         let now = ProcessInfo.processInfo.systemUptime
         if let sent = statusRequestAt {
-            if now - sent >= Self.handshakeMaximumAge {
+            if statusWait.overdue(requestedAt: sent, now: now) {
                 transportFailed("Fan helper response timed out; restoration cannot yet be confirmed.")
             }
             return
@@ -655,8 +658,15 @@ final class FanControlService: ObservableObject {
                 Task { @MainActor in
                     guard let self, self.generation == requestGeneration, self.statusRequestToken == token else { return }
                     self.statusRequestAt = nil; self.statusRequestToken = nil
-                    let age = ProcessInfo.processInfo.systemUptime - now
-                    guard age >= 0, age < Self.handshakeMaximumAge else {
+                    switch self.statusWait.reply(requestedAt: now, now: ProcessInfo.processInfo.systemUptime) {
+                    case .usable: break
+                    case .askAgain:
+                        // G-Q3: this reply authorizes nothing, but the connection
+                        // and the session may still be good.
+                        if self.protocolReady { self.protocolReady = false }
+                        self.requestStatus()
+                        return
+                    case .giveUp:
                         self.transportFailed("Fan helper status arrived too late to authorize fan controls.")
                         return
                     }
@@ -669,7 +679,8 @@ final class FanControlService: ObservableObject {
                     self.protocolHandshake = ProtocolHandshake(connectionGeneration: requestGeneration,
                                                                serviceGeneration: self.status.serviceGeneration,
                                                                requestedAt: now)
-                    if !self.protocolReady { self.protocolReady = true }
+                    let wasLocked = !self.protocolReady
+                    if wasLocked { self.protocolReady = true }
                     // Learning compatibility does not replay an owner action
                     // or enable control. Existing accepted wake intent can be
                     // qualified on subsequent timer ticks.
@@ -681,6 +692,10 @@ final class FanControlService: ObservableObject {
                     if self.resumeAfterWake && [.unavailable, .restorationFailed, .externalRecoveryRequired].contains(self.status.mode) {
                         self.abandonWakeResume(self.status.reason ?? self.status.mode.title)
                     }
+                    // G-Q3: no renewal goes out while the status is stale, so a
+                    // pause may have used up most of the lease. Waiting for the
+                    // next tick could lose it.
+                    if wasLocked { self.renewLease() }
                 }
             }
         } catch { transportFailed(error.localizedDescription) }
@@ -804,7 +819,7 @@ final class FanControlService: ObservableObject {
         connectionValidity?.invalidate(); connectionValidity = nil
         generation = UUID()
         protocolReady = false; protocolHandshake = nil
-        statusRequestAt = nil; statusRequestToken = nil
+        statusRequestAt = nil; statusRequestToken = nil; statusWait.reset()
         connection?.invalidate(); connection = nil
     }
 
