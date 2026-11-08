@@ -100,6 +100,8 @@ Later on **2026-10-19**, development build 11 was checked further on that same M
 
 The production app of development build 11 was put back afterwards, and Fan Control turned on again.
 
+On **2026-11-08**, development build 6 was installed on that same Mac and OS with the changes of [ADR 0013](adr/0013-a-frozen-app-keeps-fan-control-for-30-seconds.md), and both helpers were removed and set up again. The production suite passed **732 tests** and the qualification-flag suite **755**, with zero failures. Under a heavy Blender and model-training load, the app was frozen with `SIGSTOP` while the helper held the fans. Three 8-second and two 20-second freezes left the same session on. A 35-second freeze ended it with "The app lease expired after 30 seconds.", saved that reason as the stop note and delivered the "Fan Control stopped" notification. A helper that stops answering for 32 seconds, and a freeze caused by real paging, were not reproduced.
+
 AppleSMC and the thermal interfaces used here are undocumented and may change with macOS. Already-issued synchronous kernel or filesystem calls cannot be preempted. The helper's deadlines restrict admission and confirmation of operations; they do not guarantee a hard wall-clock restoration deadline. A successful build, source test, or signature inspection cannot substitute for native release and recovery checks.
 
 The AppleSMC and HID thermal adapters contain adaptations from Stats; [ThirdPartyNotices.txt](../ThirdPartyNotices.txt) retains the component's MIT notice.
