@@ -25,7 +25,20 @@ public final class FanSafetyGate {
     // own freshness stays three seconds (FanSnapshot.validate).
     public static let completeFrameLimitSeconds: TimeInterval = 4
 
-    public init() {}
+    // L-Q1 (owner, 2026-11-08): how long a session lasts without a renewal
+    // from the app. It was five seconds until build 6; under heavy memory
+    // pressure the app's main thread froze for 5.1 and 8.2 seconds and the
+    // lease ended Fan Control. A lost connection still ends the session at
+    // once, and the helper's own fan rules run whatever the app does.
+    public static let leaseSeconds: TimeInterval = 30
+    public static let leaseExpiredReason = "The app lease expired after \(Int(leaseSeconds)) seconds."
+
+    private let leaseSeconds: TimeInterval
+
+    // Tests of how an expiry cancels work in progress may use a shorter lease.
+    public init(leaseSeconds: TimeInterval = FanSafetyGate.leaseSeconds) {
+        self.leaseSeconds = leaseSeconds
+    }
 
     public func begin(owner: String, now: TimeInterval) throws -> String {
         lock.lock(); defer { lock.unlock() }
@@ -33,7 +46,7 @@ public final class FanSafetyGate {
         guard self.owner == nil, removalOwner == nil, recoveryOwner == nil else { throw FanControlError.busy }
         self.owner = owner
         let id = UUID().uuidString
-        session = id; leaseDeadline = now + 5; telemetryDeadline = now + Self.completeFrameLimitSeconds
+        session = id; leaseDeadline = now + leaseSeconds; telemetryDeadline = now + Self.completeFrameLimitSeconds
         stopReason = nil; overrideHeld = false; generation &+= 1
         return id
     }
@@ -53,7 +66,7 @@ public final class FanSafetyGate {
         lock.lock(); defer { lock.unlock() }
         expire(now: now)
         guard self.owner == owner, self.session == session, stopReason == nil else { return false }
-        leaseDeadline = now + 5
+        leaseDeadline = now + leaseSeconds
         return true
     }
 
@@ -214,7 +227,9 @@ public final class FanSafetyGate {
 
     private func expire(now: TimeInterval) {
         guard owner != nil, stopReason == nil else { return }
-        if now >= leaseDeadline { stopReason = "The app lease expired after five seconds." }
+        if now >= leaseDeadline {
+            stopReason = "The app lease expired after \(Int(leaseSeconds)) seconds."
+        }
         else if overrideHeld && now >= telemetryDeadline { stopReason = "No complete fresh sensor snapshot for four seconds." }
         if stopReason != nil { generation &+= 1 }
     }

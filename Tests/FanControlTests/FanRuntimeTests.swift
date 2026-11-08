@@ -185,8 +185,11 @@ final class FanRuntimeTests: XCTestCase {
         gate.finish()
         let next = try gate.begin(owner: "first", now: 10)
         for time in [11.0, 12, 13, 14] { gate.fresh(at: time, now: time) }
-        XCTAssertFalse(gate.renew(owner: "first", session: next, now: 15))
-        XCTAssertTrue(gate.check(now: 15).reason!.contains("five seconds"))
+        XCTAssertTrue(gate.renew(owner: "first", session: next, now: 15))
+        let expiry = 15 + FanSafetyGate.leaseSeconds
+        XCTAssertNil(gate.check(now: expiry - 0.01).reason)
+        XCTAssertFalse(gate.renew(owner: "first", session: next, now: expiry))
+        XCTAssertEqual(gate.check(now: expiry).reason, FanSafetyGate.leaseExpiredReason)
     }
 
     // H-Q4: a session survives four seconds without a complete usable frame,
@@ -212,7 +215,7 @@ final class FanRuntimeTests: XCTestCase {
     func testCompleteFrameLimitAppliesOnlyWhileAnOverrideIsHeld() throws {
         let gate = FanSafetyGate()
         let session = try gate.begin(owner: "owner", now: 0)
-        XCTAssertEqual(gate.nextDeadline(now: 0), 5)
+        XCTAssertEqual(gate.nextDeadline(now: 0), FanSafetyGate.leaseSeconds)
         XCTAssertTrue(gate.renew(owner: "owner", session: session, now: 4))
         XCTAssertNil(gate.check(now: 8.99).reason, "Watching outlasts the complete-frame limit.")
         gate.fresh(at: 8, now: 8.99)
@@ -222,9 +225,10 @@ final class FanRuntimeTests: XCTestCase {
         XCTAssertTrue(gate.renew(owner: "owner", session: session, now: 8.99))
         XCTAssertEqual(gate.nextDeadline(now: 8.99), 12)
         gate.noteOverride(held: false, now: 11)
-        XCTAssertEqual(gate.nextDeadline(now: 11), 13.99)
+        XCTAssertEqual(gate.nextDeadline(now: 11), 8.99 + FanSafetyGate.leaseSeconds)
         XCTAssertNil(gate.check(now: 13).reason, "A released session watches again.")
-        XCTAssertEqual(gate.check(now: 13.99).reason, "The app lease expired after five seconds.")
+        XCTAssertNil(gate.check(now: 8.98 + FanSafetyGate.leaseSeconds).reason)
+        XCTAssertEqual(gate.check(now: 8.99 + FanSafetyGate.leaseSeconds).reason, FanSafetyGate.leaseExpiredReason)
 
         // An override is never taken on a stale frame.
         gate.finish()
@@ -572,13 +576,18 @@ final class FanRuntimeTests: XCTestCase {
                 hardware.invalidTelemetry = false
                 _ = self.stop(controller)
             }),
-            ("an expired lease", "The app lease expired after five seconds.", { controller, hardware in
-                hardware.clock.now = 6
-                self.poll(controller)
+            ("an expired lease", FanSafetyGate.leaseExpiredReason, { controller, hardware in
+                // Fresh frames each second, and no renewal from the app.
+                for second in 1...Int(FanSafetyGate.leaseSeconds) {
+                    hardware.clock.now = TimeInterval(second); self.poll(controller)
+                }
             }),
             ("an expired lease already recorded when the app's stop arrives", Self.appStop, { controller, hardware in
-                hardware.clock.now = 6
-                _ = controller.safety.check(now: 6)
+                for second in 1..<Int(FanSafetyGate.leaseSeconds) {
+                    hardware.clock.now = TimeInterval(second); self.poll(controller)
+                }
+                hardware.clock.now = FanSafetyGate.leaseSeconds
+                XCTAssertEqual(controller.safety.check(now: FanSafetyGate.leaseSeconds).reason, FanSafetyGate.leaseExpiredReason)
                 _ = self.stop(controller)
             }),
             ("no complete frame for four seconds", "No complete fresh sensor snapshot for four seconds.", { controller, hardware in
@@ -1219,7 +1228,8 @@ final class FanRuntimeTests: XCTestCase {
                 $0.contains("Entry frame unusable") && $0.contains("\(FakeFans.invalidMaximum)")
             }.count, invalid, "\(invalid)")
             XCTAssertNil(started.idleFaults, "An entry frame is logged, not counted as an idle fault.")
-            XCTAssertEqual(controller.safety.nextDeadline(now: hardware.clock.now), 5, "The lease still runs from the request.")
+            XCTAssertEqual(controller.safety.nextDeadline(now: hardware.clock.now),
+                           min(FanSafetyGate.leaseSeconds, Double(invalid) + 4), "The lease still runs from the request.")
             hardware.clock.now += 1
             XCTAssertTrue(controller.renew(owner: "owner", session: session))
             XCTAssertEqual(controller.safety.nextDeadline(now: hardware.clock.now), Double(invalid) + 4)

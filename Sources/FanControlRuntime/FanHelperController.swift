@@ -4,7 +4,7 @@ import FanControlCore
 #endif
 
 public final class FanHelperController {
-    public let safety = FanSafetyGate()
+    public let safety: FanSafetyGate
     private let worker = DispatchQueue(label: "MacHelm.fan.hardware", qos: .userInitiated)
     private let watchdogQueue = DispatchQueue(label: "MacHelm.fan.watchdog", qos: .userInitiated)
     private let cacheLock = NSLock()
@@ -71,7 +71,9 @@ public final class FanHelperController {
                 clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
                 startTimers: Bool = true, qualificationProvenance: @escaping () -> String? = { nil },
                 modeDiagnosticTiming: FanModeDiagnosticTiming? = nil,
-                entryFramePause: @escaping (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) }) throws {
+                entryFramePause: @escaping (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
+                leaseSeconds: TimeInterval = FanSafetyGate.leaseSeconds) throws {
+        safety = FanSafetyGate(leaseSeconds: leaseSeconds)
         let generation = UUID().uuidString
         self.hardware = hardware; self.conflict = conflict; self.clock = clock
         self.qualificationProvenance = qualificationProvenance

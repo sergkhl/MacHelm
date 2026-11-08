@@ -278,50 +278,111 @@ final class FanLaunchResumeTests: XCTestCase {
 
 // G-Q3 (owner, 2026-11-05): on 2026-11-03 one status reply older than three
 // seconds ended Fan Control, and it stayed off until turned on again.
+// L-Q3 (owner, 2026-11-08): the app gives up only after the lease and a margin
+// of its own running time without a usable reply.
 final class FanStatusWaitTests: XCTestCase {
-    func testOneLateReplyIsDroppedAndAskedAgainInsteadOfEndingFanControl() {
+    func testALateReplyIsDroppedAndAskedAgainInsteadOfEndingFanControl() {
         var wait = FanStatusWait()
-        XCTAssertEqual(wait.reply(requestedAt: 100, now: 102.9), .usable)
-        XCTAssertEqual(wait.reply(requestedAt: 103, now: 106), .askAgain)
-        XCTAssertEqual(wait.reply(requestedAt: 106, now: 106.1), .usable)
+        wait.asked(running: 0)
+        XCTAssertEqual(wait.reply(requestedAt: 100, now: 102.9, running: 2.9), .usable)
+        wait.asked(running: 3)
+        XCTAssertEqual(wait.reply(requestedAt: 103, now: 106, running: 6), .askAgain)
+        XCTAssertEqual(wait.reply(requestedAt: 106, now: 106.1, running: 6.1), .usable)
     }
 
-    func testASecondLateReplyInARowGivesUp() {
+    func testLateRepliesInARowAreAskedAgainUntilTheLimit() {
         var wait = FanStatusWait()
-        XCTAssertEqual(wait.reply(requestedAt: 100, now: 103), .askAgain)
-        XCTAssertEqual(wait.reply(requestedAt: 103, now: 106), .giveUp)
+        wait.asked(running: 0)
+        XCTAssertEqual(wait.reply(requestedAt: 100, now: 103, running: 3), .askAgain)
+        wait.asked(running: 3)
+        XCTAssertEqual(wait.reply(requestedAt: 103, now: 106, running: 6), .askAgain)
+        XCTAssertEqual(wait.reply(requestedAt: 128, now: 131.9, running: 31.9), .askAgain)
+        XCTAssertEqual(wait.reply(requestedAt: 129, now: 132, running: 32), .giveUp)
     }
 
-    func testAUsableReplyOrANewConnectionStartsTheCountAgain() {
+    func testAUsableReplyOrANewConnectionStartsTheWaitAgain() {
         var usable = FanStatusWait()
-        XCTAssertEqual(usable.reply(requestedAt: 100, now: 103), .askAgain)
-        XCTAssertEqual(usable.reply(requestedAt: 103, now: 103.1), .usable)
-        XCTAssertEqual(usable.reply(requestedAt: 104, now: 107), .askAgain)
+        usable.asked(running: 0)
+        XCTAssertEqual(usable.reply(requestedAt: 100, now: 103, running: 30), .askAgain)
+        XCTAssertEqual(usable.reply(requestedAt: 103, now: 103.1, running: 31), .usable)
+        usable.asked(running: 31)
+        XCTAssertFalse(usable.overdue(running: 62.9))
+        XCTAssertTrue(usable.overdue(running: 63))
 
         var reconnected = FanStatusWait()
-        XCTAssertEqual(reconnected.reply(requestedAt: 100, now: 103), .askAgain)
+        reconnected.asked(running: 0)
+        XCTAssertTrue(reconnected.overdue(running: 32))
         reconnected.reset()
-        XCTAssertEqual(reconnected.reply(requestedAt: 103, now: 106), .askAgain)
+        XCTAssertFalse(reconnected.overdue(running: 40))
+        reconnected.asked(running: 40)
+        XCTAssertEqual(reconnected.reply(requestedAt: 140, now: 143, running: 43), .askAgain)
+    }
+
+    func testALaterRequestDoesNotRestartTheWait() {
+        var wait = FanStatusWait()
+        wait.asked(running: 0)
+        wait.asked(running: 20)
+        XCTAssertTrue(wait.overdue(running: 32))
     }
 
     func testAReplyFromTheFutureAuthorizesNothing() {
         var wait = FanStatusWait()
-        XCTAssertEqual(wait.reply(requestedAt: 100, now: 99), .askAgain)
+        wait.asked(running: 0)
+        XCTAssertEqual(wait.reply(requestedAt: 100, now: 99, running: 1), .askAgain)
     }
 
     // The app must not give up while the helper could still keep the session.
+    // Running time never runs ahead of real time, so a limit past the lease in
+    // running time is past it in real time too.
     func testNoReplyIsWaitedForUntilAfterTheLeaseHasRunOut() throws {
-        let wait = FanStatusWait()
+        var wait = FanStatusWait()
+        wait.asked(running: 0)
         let keeping = FanSafetyGate()
         let kept = try keeping.begin(owner: "app", now: 100)
-        XCTAssertTrue(keeping.renew(owner: "app", session: kept, now: 104.9))
-        XCTAssertFalse(wait.overdue(requestedAt: 100, now: 104.9))
+        XCTAssertTrue(keeping.renew(owner: "app", session: kept, now: 129.9))
+        XCTAssertFalse(wait.overdue(running: 29.9))
 
         let losing = FanSafetyGate()
         let lost = try losing.begin(owner: "app", now: 100)
-        XCTAssertFalse(losing.renew(owner: "app", session: lost, now: 105))
-        XCTAssertFalse(wait.overdue(requestedAt: 100, now: 105.9))
-        XCTAssertTrue(wait.overdue(requestedAt: 100, now: 106))
+        XCTAssertFalse(losing.renew(owner: "app", session: lost, now: 130))
+        XCTAssertFalse(wait.overdue(running: 31.9))
+        XCTAssertTrue(wait.overdue(running: 32))
+    }
+}
+
+// L-Q2 (owner, 2026-11-08): on 2026-11-08 the app's main thread froze for 8.2
+// seconds under memory pressure. Its own limits must not count that.
+final class FanRunningClockTests: XCTestCase {
+    func testTicksASecondApartCountInFull() {
+        var clock = FanRunningClock(uptime: 100)
+        for second in 1...10 { XCTAssertEqual(clock.read(uptime: 100 + Double(second)), Double(second), accuracy: 1e-9) }
+        XCTAssertEqual(clock.read(uptime: 111.9), 11.9, accuracy: 1e-9)
+    }
+
+    func testAFreezeCountsOnlyTheStepLimit() {
+        var clock = FanRunningClock(uptime: 100)
+        XCTAssertEqual(clock.read(uptime: 101), 1, accuracy: 1e-9)
+        XCTAssertEqual(clock.read(uptime: 109.2), 1 + FanRunningClock.stepLimit, accuracy: 1e-9)
+        XCTAssertEqual(clock.read(uptime: 110.2), 2 + FanRunningClock.stepLimit, accuracy: 1e-9)
+    }
+
+    func testTheClockNeverRunsAheadOfUptimeOrBackwards() {
+        var clock = FanRunningClock(uptime: 100)
+        XCTAssertEqual(clock.read(uptime: 99), 0)
+        XCTAssertEqual(clock.read(uptime: 100.5), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(clock.read(uptime: 100.5), 0.5, accuracy: 1e-9)
+        XCTAssertLessThanOrEqual(clock.read(uptime: 140), 40)
+    }
+
+    // An 8.2 s freeze while a status request is out no longer ends the wait.
+    func testAFreezeOfEightSecondsDoesNotUseUpTheStatusWait() {
+        var clock = FanRunningClock(uptime: 100)
+        var wait = FanStatusWait()
+        wait.asked(running: clock.read(uptime: 100))
+        let resumed = clock.read(uptime: 108.2)
+        XCTAssertFalse(wait.overdue(running: resumed))
+        XCTAssertEqual(wait.reply(requestedAt: 100, now: 108.2, running: resumed), .askAgain)
+        XCTAssertEqual(wait.reply(requestedAt: 108.2, now: 108.3, running: clock.read(uptime: 108.3)), .usable)
     }
 }
 
@@ -367,7 +428,7 @@ final class FanStopNoteTests: XCTestCase {
         XCTAssertFalse(waiting.announce(waited: 6, coveredElsewhere: false))
 
         var told = FanStopNote(reason: "The control lease ended.", at: Date(), awaitingHelper: true)
-        XCTAssertTrue(told.adopt(status(.paused, reason: "The app lease expired after five seconds.")))
+        XCTAssertTrue(told.adopt(status(.paused, reason: FanSafetyGate.leaseExpiredReason)))
         XCTAssertTrue(told.announce(waited: 1, coveredElsewhere: false))
     }
 

@@ -76,46 +76,83 @@ public struct FanStopNote: Codable, Equatable {
 }
 
 // G-Q3 (owner, 2026-11-05): a status reply older than three seconds authorizes
-// nothing, but one such reply does not end Fan Control. The app or the helper
-// only paused, and the connection and the session may still be good, so the
-// reply is dropped and the app asks again at once. Fan controls stay locked
-// until a usable reply comes. The helper's five-second lease still ends a
-// session the app could not renew in time.
+// nothing, but it does not end Fan Control. The app or the helper only paused,
+// and the connection and the session may still be good, so the reply is
+// dropped and the app asks again at once. Fan controls stay locked until a
+// usable reply comes.
+// L-Q3 (owner, 2026-11-08): the app gives up on the helper only after
+// `answerLimit` of its own running time without a usable reply, whether no
+// reply came or every reply was late. Until build 6 it gave up after six
+// seconds or on a second late reply in a row. The helper's lease still ends
+// a session the app could not renew in time.
 public struct FanStatusWait {
-    // How old a status may be and still authorize fan controls.
+    // How old a status may be and still authorize fan controls. This is real
+    // time: a reply that waited while the app was frozen describes the past.
     public static let maximumAge: TimeInterval = 3
     // Longer than the lease, so waiting never ends a session the helper could
-    // still keep.
-    public static let answerLimit: TimeInterval = 6
+    // still keep. It is measured in the app's running time (FanRunningClock),
+    // which never runs ahead of real time.
+    public static let answerLimit: TimeInterval = FanSafetyGate.leaseSeconds + 2
 
     public enum Reply: Equatable {
         case usable
         case askAgain
-        // Two late replies in a row mean at least six seconds without a usable
-        // status, which is also longer than the lease.
+        // No usable status for `answerLimit` of running time.
         case giveUp
     }
 
-    private var lateInARow = 0
+    // Running time at which the current wait for a usable status began.
+    private var waitingSince: TimeInterval?
 
     public init() {}
 
-    public mutating func reply(requestedAt: TimeInterval, now: TimeInterval) -> Reply {
+    // A status request goes out. The first one since the last usable reply
+    // starts the wait.
+    public mutating func asked(running: TimeInterval) {
+        if waitingSince == nil { waitingSince = running }
+    }
+
+    public mutating func reply(requestedAt: TimeInterval, now: TimeInterval, running: TimeInterval) -> Reply {
         let age = now - requestedAt
         guard age >= 0, age < Self.maximumAge else {
-            lateInARow += 1
-            return lateInARow > 1 ? .giveUp : .askAgain
+            return overdue(running: running) ? .giveUp : .askAgain
         }
-        lateInARow = 0
+        waitingSince = nil
         return .usable
     }
 
-    // A request that is still unanswered at this point ends the connection.
-    public func overdue(requestedAt: TimeInterval, now: TimeInterval) -> Bool {
-        now - requestedAt >= Self.answerLimit
+    // Whether the wait has lasted too long. Checked on each tick while a
+    // request is unanswered, and on each late reply.
+    public func overdue(running: TimeInterval) -> Bool {
+        guard let waitingSince else { return false }
+        return running - waitingSince >= Self.answerLimit
     }
 
-    public mutating func reset() { lateInARow = 0 }
+    public mutating func reset() { waitingSince = nil }
+}
+
+// L-Q2 (owner, 2026-11-08): the app's own limits count only time the app was
+// running, not time it was frozen itself. On 2026-11-08, under heavy memory
+// pressure, its main thread stopped for 5.1 and 8.2 seconds. Its one-second
+// timer reads this clock, so a longer step between two reads means the app
+// did not run, and only `stepLimit` of that step counts. The clock never runs
+// ahead of system uptime.
+public struct FanRunningClock {
+    public static let stepLimit: TimeInterval = 2
+
+    private var lastUptime: TimeInterval
+    private var running: TimeInterval = 0
+
+    public init(uptime: TimeInterval) { lastUptime = uptime }
+
+    public mutating func read(uptime: TimeInterval) -> TimeInterval {
+        let step = uptime - lastUptime
+        if step > 0 {
+            running += min(step, Self.stepLimit)
+            lastUptime = uptime
+        }
+        return running
+    }
 }
 
 // SR-Q2 (owner, 2026-10-11): with on saved, a launch brings Fan Control back

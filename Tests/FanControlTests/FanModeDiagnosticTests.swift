@@ -266,7 +266,7 @@ final class FanModeDiagnosticTests: XCTestCase {
 
     func testTelemetryAndLeaseExpiryEndCollectionWithoutFresheningFanData() throws {
         for lease in [false, true] {
-            let fans = DiagnosticFans(), journal = DiagnosticJournal(), gate = FanSafetyGate()
+            let fans = DiagnosticFans(), journal = DiagnosticJournal(), gate = FanSafetyGate(leaseSeconds: 5) // As until build 6
             _ = try gate.begin(owner: "owner", now: 100)
             gate.noteOverride(held: true, now: 100) // As before an entry's durable intent (G-Q1).
             if lease {
@@ -915,7 +915,8 @@ final class FanModeDiagnosticTests: XCTestCase {
                         } else { fans.clock.now += 4.1 }
                     }
                     return nil
-                }, clock: { fans.clock.now }, startTimers: false, modeDiagnosticTiming: timing(fans))
+                }, clock: { fans.clock.now }, startTimers: false, modeDiagnosticTiming: timing(fans),
+                leaseSeconds: 5)
             let done = expectation(description: "cancelled begin finishes")
             controller.begin(owner: "owner", profile: .standard) { _ in done.fulfill() }
             wait(for: [done], timeout: 1)
@@ -1066,7 +1067,7 @@ final class FanManualAcknowledgementStoreTests: XCTestCase {
         for change in 0..<9 {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             defer { try? FileManager.default.removeItem(at: directory) }
-            let gate = FanSafetyGate()
+            let gate = FanSafetyGate(leaseSeconds: 5) // The lease used until build 6.
             // Change 6: with no frame since a begin at 96.15, the four-second
             // complete-frame window ends at 100.15. Change 7: the lease ends at 100.2.
             let session = try gate.begin(owner: "owner", now: change == 7 ? 95.2 : (change == 6 ? 96.15 : 100))

@@ -541,7 +541,7 @@ final class FanTargetDiagnosticTests: XCTestCase {
     // expiry block further writes, but not confirmation of the returned write.
     func testLifecycleRevocationBlocksSuccessorsButNotConfirmation() throws {
         for change in 0..<7 {
-            let gate = FanSafetyGate()
+            let gate = FanSafetyGate(leaseSeconds: 5) // The lease used until build 6.
             // Change 5: with no frame since a begin at 96.25, the four-second
             // complete-frame window ends at 100.25. Change 6: the lease ends at 100.2.
             let session = try gate.begin(owner: "owner", now: change == 6 ? 95.2 : (change == 5 ? 96.25 : 100))
@@ -1219,8 +1219,11 @@ final class FanTargetDiagnosticControllerTests: XCTestCase {
         try FanHelperController(hardware: fans, persistence: journal, bootID: boot,
             artifactIdentity: "fake-target-artifact", conflict: conflict, clock: { fans.clock.now },
             startTimers: false, modeDiagnosticTiming: FanModeDiagnosticTiming(clock: { fans.clock.now },
-                pause: { fans.clock.now += $0 }))
+                pause: { fans.clock.now += $0 }), leaseSeconds: Self.testLease)
     }
+    // These cases test how an expiring lease stops work in progress, with the
+    // five-second lease used until build 6.
+    private static let testLease: TimeInterval = 5
     private func begin(_ controller: FanHelperController, owner: String = "owner") -> FanStatus {
         let done = expectation(description: "begin reply")
         var status = FanStatus(serviceGeneration: "none")

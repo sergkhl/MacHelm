@@ -80,6 +80,8 @@ final class FanControlService: ObservableObject {
     private var statusRequestAt: TimeInterval?
     private var statusRequestToken: UUID?
     private var statusWait = FanStatusWait()
+    // L-Q2: the app's own limits count only time the app was running.
+    private var runningClock = FanRunningClock(uptime: ProcessInfo.processInfo.systemUptime)
     private var protocolHandshake: ProtocolHandshake?
     private var operationToken: UUID?
     private var operationFailure: (() -> Void)?
@@ -589,6 +591,8 @@ final class FanControlService: ObservableObject {
     }
 
     private func tick() {
+        // L-Q2: the one-second tick is what tells a frozen app from a running one.
+        _ = runningNow()
         // An approval that is being waited for in front of the owner is looked for every second.
         if dashboardVisible && !helperApproved { refreshHelperStatus() }
         refreshMenuBarReadout()
@@ -642,7 +646,7 @@ final class FanControlService: ObservableObject {
         guard helperApproved, !sleeping else { return }
         let now = ProcessInfo.processInfo.systemUptime
         if let sent = statusRequestAt {
-            if statusWait.overdue(requestedAt: sent, now: now) {
+            if statusWait.overdue(running: runningNow()) {
                 transportFailed("Fan helper response timed out; restoration cannot yet be confirmed.")
             }
             return
@@ -650,6 +654,7 @@ final class FanControlService: ObservableObject {
         do {
             let proxy = try statusRemote()
             statusRequestAt = now
+            statusWait.asked(running: runningNow())
             let token = UUID(); statusRequestToken = token
             let requestGeneration = generation
             proxy.handshake(protocolVersion: FanStatus.currentProtocolVersion,
@@ -658,7 +663,8 @@ final class FanControlService: ObservableObject {
                 Task { @MainActor in
                     guard let self, self.generation == requestGeneration, self.statusRequestToken == token else { return }
                     self.statusRequestAt = nil; self.statusRequestToken = nil
-                    switch self.statusWait.reply(requestedAt: now, now: ProcessInfo.processInfo.systemUptime) {
+                    switch self.statusWait.reply(requestedAt: now, now: ProcessInfo.processInfo.systemUptime,
+                                                 running: self.runningNow()) {
                     case .usable: break
                     case .askAgain:
                         // G-Q3: this reply authorizes nothing, but the connection
@@ -810,7 +816,8 @@ final class FanControlService: ObservableObject {
         invalidateConnection()
         // A helper that was removed or lost its approval shows as a lost connection.
         refreshHelperStatus()
-        // Quit must also complete when XPC fails before its six-second timer.
+        // Quit must also complete when XPC fails before its six-second timer
+        // (running time, L-Q2).
         // This callback reports failure, never a restoration receipt.
         failedOperation?()
     }
@@ -823,13 +830,25 @@ final class FanControlService: ObservableObject {
         connection?.invalidate(); connection = nil
     }
 
+    private func runningNow() -> TimeInterval {
+        runningClock.read(uptime: ProcessInfo.processInfo.systemUptime)
+    }
+
+    // L-Q2: the timeout is running time. A check that comes due while the app
+    // was frozen waits for the rest of it.
     private func startOperation(timeout: TimeInterval = 6, onTimeout: @escaping () -> Void = {}) -> UUID {
         let token = UUID(); operationToken = token; operationFailure = onTimeout
-        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
+        scheduleOperationTimeout(token: token, dueAt: runningNow() + timeout)
+        return token
+    }
+
+    private func scheduleOperationTimeout(token: UUID, dueAt: TimeInterval) {
+        let wait = max(0.1, dueAt - runningNow())
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
             guard let self, self.operationToken == token else { return }
+            if self.runningNow() < dueAt { self.scheduleOperationTimeout(token: token, dueAt: dueAt); return }
             self.transportFailed("Fan helper operation timed out; automatic restoration is not confirmed.")
         }
-        return token
     }
     private func finishOperation() { operationToken = nil; operationFailure = nil; busy = false }
 

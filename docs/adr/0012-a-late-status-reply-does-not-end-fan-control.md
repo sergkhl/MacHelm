@@ -4,6 +4,8 @@ status: accepted
 
 # A late status reply does not end Fan Control
 
+The five-second lease, the six-second limit and the second-late-reply rule were replaced on 2026-11-08 by [ADR 0013](0013-a-frozen-app-keeps-fan-control-for-30-seconds.md).
+
 ## Context
 
 On 2026-11-03 at 21:11:28 Fan Control ended by itself on the owner's Mac14,9 (macOS 26.6.2), with app and helper build 4. One status reply came back more than three seconds after the app asked for it. The app treated that as a failed connection and dropped the connection, and under SR-Q1 the ending saved off. The saved stop note (ADR 0011) gave the reason. Fan Control stayed off until it was next turned on, across a restart.
