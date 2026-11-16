@@ -44,6 +44,13 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = 8117BD044590C37308E60D27;
 		};
+		0849404203ED12BC216184CB = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"name" = "ClaudeDiscovery.swift";
+			"path" = "Sources/ClaudeCore/ClaudeDiscovery.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
 		0A5D4A538B48FF1EADFA10B1 = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -189,6 +196,13 @@
 			"path" = "MacHelm/Info.plist";
 			"sourceTree" = "SOURCE_ROOT";
 		};
+		2429128085DA8A6B683549A7 = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"name" = "ClaudeSessionOpener.swift";
+			"path" = "MacHelm/ClaudeSessionOpener.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
 		2438F99195575567FC013109 = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "wrapper.framework";
@@ -207,6 +221,9 @@
 			"files" = (
 				2D1BF78FBAC2B40AEC413CA6,
 				58140CAC449A96CD517F2FB3,
+				6C50B76A2362888FBD172258,
+				734F6F221F57199481BEF10A,
+				FF98B4604646CB8F6DE1C2AC,
 				C6D897F38E83F043B045E5B7,
 				4E276C9DE27F5CD06DA57CC1,
 				CC08AF3A68DA1CA3EAA3FEE2,
@@ -234,6 +251,10 @@
 				E1DFA319533DEAD9C765F3D9,
 				9FC6033E2C3A037718D62E94,
 				C145E8F0FEA98AB50A26F1CE,
+				D4F63841B10FBCEE069CE5EE,
+				ED0D4D8FD93DFB28D3EEDFEA,
+				8ED7DA9B1FC9D5735C2AB5FC,
+				6447AE0885BFD28521ED87F6,
 				4E0697A3B74D5C5D559E41C7,
 				BF7A7B9143153B54A78998DC,
 				D2C2DB390E705234290587DD,
@@ -427,6 +448,9 @@
 				43B9C92601B23FFEDDFBF555,
 				4888E799DC71DE510F62932A,
 				185C3E1696304D5651B8A640,
+				2429128085DA8A6B683549A7,
+				D01762EE5E3072A11991CCF3,
+				801161DCE793D4737345920F,
 				28166FF42BE9B1F5385E5A37,
 				7DF855EF47CA68DD22D1B604,
 				7BCF6CBA9A6ADD6DCD241687,
@@ -606,7 +630,7 @@
 			"buildSettings" = {
 				"CODE_SIGN_IDENTITY" = "Apple Development";
 				"CODE_SIGN_STYLE" = "Manual";
-				"CURRENT_PROJECT_VERSION" = "6";
+				"CURRENT_PROJECT_VERSION" = "7";
 				"DEAD_CODE_STRIPPING" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
@@ -647,7 +671,7 @@
 			"buildSettings" = {
 				"CODE_SIGN_IDENTITY" = "Apple Development";
 				"CODE_SIGN_STYLE" = "Manual";
-				"CURRENT_PROJECT_VERSION" = "6";
+				"CURRENT_PROJECT_VERSION" = "7";
 				"DEAD_CODE_STRIPPING" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
@@ -734,6 +758,7 @@
 				42076D858766DB5D175258A9,
 				5385BF6C42FAE0A3B3127AF7,
 				A864C2717DF0FE6F10488823,
+				E8D84F2F9C6966C7C6C30056,
 				76BCDBBAC42FA1031D4DDAFF,
 				774A0DF7472D659C1F49592E,
 				F71CBBA1096832937F14BACB,
@@ -759,6 +784,10 @@
 		61E491FE0A2247E17F53DDD1 = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = 7C666C790CCCE8398F03CEE0;
+		};
+		6447AE0885BFD28521ED87F6 = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = 82098745F28B70F3E3152CC7;
 		};
 		64BDE7C24F001612B5DF4887 = {
 			"isa" = "PBXNativeTarget";
@@ -813,6 +842,10 @@
 			"includeInIndex" = 0;
 			"path" = "ToolkitHelper";
 			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		6C50B76A2362888FBD172258 = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = 2429128085DA8A6B683549A7;
 		};
 		6CB417274B809E5ED1EFE2B9 = {
 			"isa" = "PBXBuildFile";
@@ -870,7 +903,7 @@
 			"buildSettings" = {
 				"CODE_SIGN_IDENTITY" = "Apple Development";
 				"CODE_SIGN_STYLE" = "Manual";
-				"CURRENT_PROJECT_VERSION" = "6";
+				"CURRENT_PROJECT_VERSION" = "7";
 				"DEAD_CODE_STRIPPING" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
@@ -903,6 +936,10 @@
 		7319670A0C258C5752F319ED = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = 071124A9A922B3D03025D530;
+		};
+		734F6F221F57199481BEF10A = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = D01762EE5E3072A11991CCF3;
 		};
 		73961EF997CCE8940E107D3A = {
 			"isa" = "PBXFileReference";
@@ -1021,6 +1058,13 @@
 			"path" = "MacHelm/StartupServicesView.swift";
 			"sourceTree" = "SOURCE_ROOT";
 		};
+		801161DCE793D4737345920F = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"name" = "ClaudeView.swift";
+			"path" = "MacHelm/ClaudeView.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
 		80880417B4740462F1CDC3E6 = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = 7B584E908FC1B66F0EDA5B1A;
@@ -1030,6 +1074,13 @@
 			"lastKnownFileType" = "sourcecode.swift";
 			"name" = "ServiceStatus.swift";
 			"path" = "Sources/StartupServicesCore/ServiceStatus.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		82098745F28B70F3E3152CC7 = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"name" = "ClaudeTaskRecords.swift";
+			"path" = "Sources/ClaudeCore/ClaudeTaskRecords.swift";
 			"sourceTree" = "SOURCE_ROOT";
 		};
 		8372531FCC1B6B6F02A5C800 = {
@@ -1105,7 +1156,7 @@
 			"buildSettings" = {
 				"CODE_SIGN_IDENTITY" = "Apple Development";
 				"CODE_SIGN_STYLE" = "Manual";
-				"CURRENT_PROJECT_VERSION" = "6";
+				"CURRENT_PROJECT_VERSION" = "7";
 				"DEAD_CODE_STRIPPING" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
@@ -1171,6 +1222,10 @@
 			"path" = "ToolkitHelper/Info.plist";
 			"sourceTree" = "SOURCE_ROOT";
 		};
+		8ED7DA9B1FC9D5735C2AB5FC = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = AAD62C7F84DAE3D5BF769C98;
+		};
 		902F0DDCD6FE667DB85369E9 = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -1199,7 +1254,7 @@
 			"buildSettings" = {
 				"CODE_SIGN_IDENTITY" = "Apple Development";
 				"CODE_SIGN_STYLE" = "Manual";
-				"CURRENT_PROJECT_VERSION" = "6";
+				"CURRENT_PROJECT_VERSION" = "7";
 				"DEAD_CODE_STRIPPING" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
@@ -1396,6 +1451,13 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = A886A07A152CC31C363793EB;
 		};
+		A8D85A859E8C0135F59B2E5A = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"name" = "ClaudeModels.swift";
+			"path" = "Sources/ClaudeCore/ClaudeModels.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
 		A9EAD06B9EA33A4350B29D93 = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = DFFEDB62B820B29D405771D8;
@@ -1405,6 +1467,13 @@
 			"lastKnownFileType" = "sourcecode.swift";
 			"name" = "main.swift";
 			"path" = "Sources/MacHelmServiceRunner/main.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		AAD62C7F84DAE3D5BF769C98 = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"name" = "ClaudeReconciler.swift";
+			"path" = "Sources/ClaudeCore/ClaudeReconciler.swift";
 			"sourceTree" = "SOURCE_ROOT";
 		};
 		ABFD9D2C2CCC26D60CC864B5 = {
@@ -1549,7 +1618,7 @@
 			"buildSettings" = {
 				"CODE_SIGN_IDENTITY" = "Apple Development";
 				"CODE_SIGN_STYLE" = "Manual";
-				"CURRENT_PROJECT_VERSION" = "6";
+				"CURRENT_PROJECT_VERSION" = "7";
 				"DEAD_CODE_STRIPPING" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
@@ -1632,12 +1701,19 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = 73961EF997CCE8940E107D3A;
 		};
+		D01762EE5E3072A11991CCF3 = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"name" = "ClaudeStore.swift";
+			"path" = "MacHelm/ClaudeStore.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
 		D096A91E16337691901F7BD5 = {
 			"isa" = "XCBuildConfiguration";
 			"buildSettings" = {
 				"CODE_SIGN_IDENTITY" = "Apple Development";
 				"CODE_SIGN_STYLE" = "Manual";
-				"CURRENT_PROJECT_VERSION" = "6";
+				"CURRENT_PROJECT_VERSION" = "7";
 				"DEAD_CODE_STRIPPING" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
@@ -1673,6 +1749,10 @@
 			"name" = "FanControlView.swift";
 			"path" = "MacHelm/FanControlView.swift";
 			"sourceTree" = "SOURCE_ROOT";
+		};
+		D4F63841B10FBCEE069CE5EE = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = 0849404203ED12BC216184CB;
 		};
 		D52B3046A3F2662164FF19E1 = {
 			"isa" = "PBXBuildFile";
@@ -1796,6 +1876,17 @@
 			"name" = "Frameworks";
 			"sourceTree" = "<group>";
 		};
+		E8D84F2F9C6966C7C6C30056 = {
+			"isa" = "PBXGroup";
+			"children" = (
+				0849404203ED12BC216184CB,
+				A8D85A859E8C0135F59B2E5A,
+				AAD62C7F84DAE3D5BF769C98,
+				82098745F28B70F3E3152CC7,
+			);
+			"name" = "Sources/ClaudeCore";
+			"sourceTree" = "<group>";
+		};
 		EB87CF6980C77B5655DCE21E = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = 399613B5E7A903644F6BC489;
@@ -1804,6 +1895,10 @@
 					"CodeSignOnCopy",
 				);
 			};
+		};
+		ED0D4D8FD93DFB28D3EEDFEA = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = A8D85A859E8C0135F59B2E5A;
 		};
 		ED89AAC0849ADF322A694E1C = {
 			"isa" = "PBXBuildFile";
@@ -1898,7 +1993,7 @@
 			"buildSettings" = {
 				"CODE_SIGN_IDENTITY" = "Apple Development";
 				"CODE_SIGN_STYLE" = "Manual";
-				"CURRENT_PROJECT_VERSION" = "6";
+				"CURRENT_PROJECT_VERSION" = "7";
 				"DEAD_CODE_STRIPPING" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
@@ -1928,6 +2023,10 @@
 			"name" = "FanAlerts.swift";
 			"path" = "MacHelm/FanAlerts.swift";
 			"sourceTree" = "SOURCE_ROOT";
+		};
+		FF98B4604646CB8F6DE1C2AC = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = 801161DCE793D4737345920F;
 		};
 	};
 	"rootObject" = 8372531FCC1B6B6F02A5C800;

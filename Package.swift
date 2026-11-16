@@ -27,6 +27,8 @@ let package = Package(
         .testTarget(name: "ToolkitTests", dependencies: ["ToolkitCore"]),
         .target(name: "ActivityCore"),
         .testTarget(name: "ActivityTests", dependencies: ["ActivityCore"]),
+        .target(name: "ClaudeCore", dependencies: ["ActivityCore"]),
+        .testTarget(name: "ClaudeTests", dependencies: ["ClaudeCore", "ActivityCore"]),
         .target(name: "PowerCore"),
         .testTarget(name: "PowerTests", dependencies: ["PowerCore"]),
         .target(name: "StorageCore"),

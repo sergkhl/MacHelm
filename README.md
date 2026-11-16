@@ -1,10 +1,10 @@
 # MacHelm
 
-A native macOS dashboard and menu bar for managing a developer workstation: cooling, power, process activity, storage cleanup, startup services, and cursor hiding.
+A native macOS dashboard and menu bar for cooling, power, process activity, storage cleanup, startup services, Claude background work, and cursor hiding.
 
 Inspect what is using the Mac, review cleanup targets, and manage personal services from one place. Each tool makes its effect explicit: opening a page reads state; changing a control or confirming a cleanup performs the action.
 
-**Version 0.1, build 2.** This is a source release for macOS 26 or later. Build it with Xcode 26 or later. A signed, notarized application download is not included in this release.
+**Version 0.1, build 7.** This is a source release for macOS 26 or later. Build it with Xcode 26 or later. A signed, notarized application download is not included in this release.
 
 ## Tools
 
@@ -15,9 +15,10 @@ Inspect what is using the Mac, review cleanup targets, and manage personal servi
 | **Activity** | Shows the five heaviest process groups for CPU, memory, GPU, energy, and disk over a selected time window. Expand a row to inspect its processes, quit an app, or open Activity Monitor. |
 | **Storage** | Scans developer caches, simulators, runtimes, and Android emulators, as well as app caches, leftover update downloads, idle Codex chats and Claude Code sessions, merged or idle worktrees, device backups, and the Trash. Review the measured targets and confirm a cleanup; what cannot be restored starts unchecked. The [Python cleanup utility](Storage/README.md) also works in a terminal. |
 | **Startup Services** | Imports your LaunchAgents or adds programs and scripts. Manage their login behavior and current-session state while keeping each service's launchd rules. See [Startup Services](docs/startup-services.md). |
+| **Claude** | Groups live background jobs and sessions that need input by conversation. Expand a row for the session ID and process IDs, or open the owning session to see output and manage tasks. See [Claude background work](docs/claude-background-work-plan.md). |
 | **Tweaks** | Cursor hide uses **Ctrl+Option+Command+H** (`⌃⌥⌘H`) to hide or restore the system pointer, including while another app is active. This experimental feature uses private WindowServer APIs; see [behavior and compatibility](docs/cursor-hide.md). |
 
-The dashboard opens on Overview. Click a card heading to open its detailed page, or select it in the sidebar. General explanations are available from info buttons; current readings, status and problems stay visible. Tweaks follows Startup Services, and Settings (`⌘,`) stays at the bottom of the sidebar.
+The dashboard opens on Overview. Click a card heading to open its detailed page, or select it in the sidebar. General explanations are available from info buttons; current readings, status and problems stay visible. Open Claude with `⌘8`, Tweaks with `⌘7`, and Settings with `⌘,`.
 
 Closing the window leaves MacHelm running in the menu bar. Its menu offers Fan Control and Keep Awake, available storage space, Startup Services, and a clickable Activity group with the five heaviest CPU groups. Activity uses the selected averaging window and keeps the menu's displayed snapshot stable until it closes. Settings controls opening at login, the temperature/fan readout, and Activity's reading pace.
 

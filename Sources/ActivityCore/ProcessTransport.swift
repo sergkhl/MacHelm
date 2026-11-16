@@ -157,30 +157,59 @@ public struct DarwinProcessTransport: ProcessTransport, ProcessSignalTransport {
     }
 
     public func arguments(of pid: Int32) -> [String]? {
+        procArgs(of: pid).flatMap(Self.arguments(inProcArgs:))
+    }
+
+    // Return just the requested value. Callers do not need the rest of the environment.
+    public func environmentValue(_ key: String, of pid: Int32) -> String? {
+        procArgs(of: pid).flatMap { Self.environmentValue(key, inProcArgs: $0) }
+    }
+
+    private func procArgs(of pid: Int32) -> [UInt8]? {
         var name: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
         var size = 0
         guard sysctl(&name, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return nil }
         var buffer = [UInt8](repeating: 0, count: size)
         guard sysctl(&name, 3, &buffer, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return nil }
-        return Self.arguments(inProcArgs: Array(buffer.prefix(size)))
+        buffer.removeLast(buffer.count - size)
+        return buffer
     }
 
     // The kernel's layout: the argument count, the executable's path, padding
     // of zero bytes, then the arguments, each ending in a zero byte.
     static func arguments(inProcArgs bytes: [UInt8]) -> [String]? {
+        guard let fields = argumentFields(inProcArgs: bytes) else { return nil }
+        return fields.arguments.map { String(decoding: bytes[$0], as: UTF8.self) }
+    }
+
+    static func environmentValue(_ key: String, inProcArgs bytes: [UInt8]) -> String? {
+        guard let fields = argumentFields(inProcArgs: bytes), fields.ended else { return nil }
+        let prefix = Array((key + "=").utf8)
+        var start = fields.next
+        while start < bytes.count, bytes[start] != 0, let end = bytes[start...].firstIndex(of: 0) {
+            let field = bytes[start..<end]
+            if field.starts(with: prefix) {
+                return String(bytes: field.dropFirst(prefix.count), encoding: .utf8)
+            }
+            start = end + 1
+        }
+        return nil
+    }
+
+    private static func argumentFields(inProcArgs bytes: [UInt8]) -> (arguments: [Range<Int>], next: Int, ended: Bool)? {
         guard bytes.count > MemoryLayout<Int32>.size else { return nil }
         let count = bytes.withUnsafeBytes { Int($0.loadUnaligned(as: Int32.self)) }
-        guard count > 0 else { return [] }
+        guard count > 0 else { return ([], bytes.count, false) }
         var index = MemoryLayout<Int32>.size
         while index < bytes.count, bytes[index] != 0 { index += 1 }
         while index < bytes.count, bytes[index] == 0 { index += 1 }
-        var arguments: [String] = []
+        var arguments: [Range<Int>] = []
         while arguments.count < count, index < bytes.count {
             let end = bytes[index...].firstIndex(of: 0) ?? bytes.count
-            arguments.append(String(decoding: bytes[index..<end], as: UTF8.self))
+            arguments.append(index..<end)
             index = end + 1
         }
-        return arguments
+        return (arguments, index, arguments.count == count && index <= bytes.count)
     }
 
     public func systemListing() -> String? {

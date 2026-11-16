@@ -24,7 +24,7 @@ PROJECT_NAME = "MacHelm"
 PROJECT_PATH = Path("MacHelm.xcodeproj")
 BUNDLE_PREFIX = "io.github.sergkhl.MacHelm"
 VERSION = "0.1"
-BUILD = "6"
+BUILD = "7"
 APP_ENTITLEMENTS = "MacHelm/MacHelm.entitlements"
 
 
@@ -85,6 +85,7 @@ def targets() -> list[Target]:
     app_sources = swift_files(
         "MacHelm",
         "Sources/ActivityCore",
+        "Sources/ClaudeCore",
         "Sources/FanControlCore",
         "Sources/PowerCore",
         "Sources/StartupServicesCore",
@@ -450,9 +451,9 @@ def bundle_metadata(spec: Target) -> bytes:
             LSApplicationCategoryType="public.app-category.utilities",
             NSHighResolutionCapable=True,
             NSPrincipalClass="NSApplication",
-            # Storage asks Finder to empty the Trash (ADR 0008); macOS shows this when it asks.
+            # macOS shows this when a Storage or Claude action sends Apple events.
             NSAppleEventsUsageDescription="MacHelm asks Finder to empty the Trash when you choose "
-            "it in Storage.",
+            "it in Storage. It controls your terminal when you choose to open a Claude session.",
             # A fan recovery alert stays on screen until dismissed (Z-Q5); the owner can change it.
             NSUserNotificationAlertStyle="alert",
         )

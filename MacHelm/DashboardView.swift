@@ -12,13 +12,16 @@ final class ToolHost {
     let startupServices = StartupServicesStore()
     // The heaviest processes. It only reads, in the background too (ADR 0005, ADR 0006).
     let activity: ActivityStore
+    let claude: ClaudeStore
     // Keep Awake and the sleep timers. Keep Awake's hold ends on quit; the timers are macOS's own.
     let power = PowerService()
     // Available space and the developer storage cleanup. Nothing is scanned or removed unless the owner asks.
     let storage: StorageService
 
     init() {
-        activity = ActivityStore(services: startupServices)
+        let activity = ActivityStore(services: startupServices)
+        self.activity = activity
+        claude = ClaudeStore(activity: activity)
         storage = StorageService(power: power)
     }
 
@@ -55,7 +58,7 @@ final class ToolHost {
 }
 
 enum ToolGroup: String, CaseIterable, Identifiable {
-    case cooling, power, activity, storage, startupServices, cursor
+    case cooling, power, activity, storage, startupServices, claude, cursor
 
     var id: String { rawValue }
 
@@ -67,6 +70,7 @@ enum ToolGroup: String, CaseIterable, Identifiable {
         case .activity: return "Activity"
         case .storage: return "Storage"
         case .startupServices: return "Startup Services"
+        case .claude: return "Claude"
         }
     }
 
@@ -78,6 +82,7 @@ enum ToolGroup: String, CaseIterable, Identifiable {
         case .activity: return "waveform.path.ecg"
         case .storage: return "internaldrive"
         case .startupServices: return "power"
+        case .claude: return "terminal"
         }
     }
 
@@ -90,13 +95,14 @@ enum ToolGroup: String, CaseIterable, Identifiable {
         case .activity: return "Activity only reads. Quitting MacHelm changes nothing for the apps listed here."
         case .storage: return "Nothing is scanned or removed by itself. What Clean removes is gone for good; quitting MacHelm stops a scan or a clean that is running."
         case .startupServices: return "Services keep running when MacHelm quits."
+        case .claude: return "Claude sessions and jobs continue when MacHelm quits."
         }
     }
 }
 
 // The dashboard's pages (ADR 0001): the Overview, then one page for each tool group.
 enum DashboardPage: String, CaseIterable, Identifiable {
-    case overview, cooling, power, activity, storage, startupServices, cursor
+    case overview, cooling, power, activity, storage, startupServices, claude, cursor
 
     var id: String { rawValue }
 
@@ -109,11 +115,25 @@ enum DashboardPage: String, CaseIterable, Identifiable {
         case .activity: return .activity
         case .storage: return .storage
         case .startupServices: return .startupServices
+        case .claude: return .claude
         }
     }
 
     var title: String { group?.title ?? "Overview" }
     var symbol: String { group?.symbol ?? "square.grid.2x2" }
+
+    var shortcut: KeyEquivalent {
+        switch self {
+        case .overview: return "1"
+        case .cooling: return "2"
+        case .power: return "3"
+        case .activity: return "4"
+        case .storage: return "5"
+        case .startupServices: return "6"
+        case .cursor: return "7"
+        case .claude: return "8"
+        }
+    }
 }
 
 // Which page is shown and whether the window is on screen. From the two it
@@ -148,6 +168,7 @@ final class DashboardModel: ObservableObject {
             if services { host.startupServices.beginWatching() } else { host.startupServices.endWatching() }
         }
         host.activity.setListsOnScreen(visible && (page == .overview || page == .activity))
+        host.claude.setVisible(visible && page == .claude)
         let readings = visible && (page == .overview || page == .cooling)
         if readings != readingsShown {
             readingsShown = readings
@@ -312,7 +333,7 @@ struct DashboardView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 2) {
-            ForEach(Array(DashboardPage.allCases.enumerated()), id: \.element) { index, page in
+            ForEach(DashboardPage.allCases) { page in
                 Button { model.page = page } label: {
                     Label(page.title, systemImage: page.symbol)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -322,7 +343,7 @@ struct DashboardView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+                .keyboardShortcut(page.shortcut, modifiers: .command)
                 .accessibilityAddTraits(model.page == page ? .isSelected : [])
             }
             Spacer(minLength: 12)
@@ -354,6 +375,8 @@ struct DashboardView: View {
             PowerPage(power: host.power, setUpHelpers: host.setUpHelpers, removeHelpers: { host.removeHelpers(pressedOn: .power) })
         case .activity:
             ActivityPage(store: host.activity)
+        case .claude:
+            ClaudePage(store: host.claude)
         case .storage:
             StoragePage(storage: host.storage)
         case .startupServices:

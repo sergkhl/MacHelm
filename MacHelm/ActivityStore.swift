@@ -3,6 +3,7 @@ import Combine
 
 // One pass over the processes and the whole Mac.
 private struct ActivityReading: Sendable {
+    var processes: ProcessPass
     var averages: ActivityAverages?
     var load: SystemLoad
     // nil when it was not ranked: nothing watched while it was read.
@@ -21,9 +22,10 @@ private final class ActivitySampler: @unchecked Sendable {
         // The whole Mac first, so that reading the processes is not in its figure.
         let load = meter.read(at: uptime)
         window.length = length
-        window.add(reader.read(at: uptime))
+        let processes = reader.read(at: uptime)
+        window.add(processes)
         let averages = window.averages()
-        return ActivityReading(averages: averages, load: load, ranked: ranking.map { ranking in
+        return ActivityReading(processes: processes, averages: averages, load: load, ranked: ranking.map { ranking in
             averages.map { ActivityRanking.snapshot(of: $0, services: ranking.services, ownPID: ranking.ownPID) }
         })
     }
@@ -65,6 +67,8 @@ final class ActivityStore: ObservableObject {
     private var sampling = false
     private var listsOnScreen = false
     private var menuOpen = false
+    private var latestProcesses: ProcessPass?
+    private var processReaders: [CheckedContinuation<ProcessPass, Never>] = []
     // The latest reading while nothing watched, kept for whoever looks next.
     private var unranked: ActivityReading?
 
@@ -149,6 +153,16 @@ final class ActivityStore: ObservableObject {
         self.timer = timer
     }
 
+    // Other pages can use the raw reading without buying a second process sweep
+    // or turning on Activity's ranking. Join any pass already in progress.
+    func readProcesses() async -> ProcessPass {
+        if let latestProcesses, ProcessInfo.processInfo.systemUptime - latestProcesses.uptime < 1 { return latestProcesses }
+        return await withCheckedContinuation { continuation in
+            processReaders.append(continuation)
+            sample()
+        }
+    }
+
     private func sample() {
         // A read that takes longer than the pace is not doubled.
         guard !sampling else { return }
@@ -159,6 +173,10 @@ final class ActivityStore: ObservableObject {
             let read = sampler.sample(length: length, ranking: ranking)
             Task { @MainActor in
                 self.sampling = false
+                self.latestProcesses = read.processes
+                let readers = self.processReaders
+                self.processReaders.removeAll()
+                for reader in readers { reader.resume(returning: read.processes) }
                 if let ranked = read.ranked {
                     self.unranked = nil
                     self.show(ranked, read.load)
