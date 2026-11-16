@@ -74,6 +74,35 @@ final class ClaudeDiscoveryTests: XCTestCase {
         XCTAssertEqual(snapshot.conversations.first?.location, .detached(ClaudeAttachID("14bc06df")!))
     }
 
+    func testSelectedProfileKeepsDesktopAndOmitsOtherCLIRegistrationsAndProcesses() {
+        let desktop = root(first, pid: 200, started: 5, title: "Desktop", host: host)
+        let work = process(300, parent: 1, started: 10)
+        let other = process(400, parent: 1, started: 20)
+        let selected = ClaudeSessionRecord(id: "14bc06df", sessionId: second.uuidString, pid: 300,
+                                           kind: "background", state: "blocked", name: "Work")
+        let registrations = [
+            desktop.0,
+            ClaudeRegistration(record: selected, worker: work.identity, terminal: nil),
+            ClaudeRegistration(record: .init(jobId: "23ac81e0", sessionId: UUID().uuidString, pid: 400,
+                                              kind: "bg", status: "waiting", name: "Other profile"), worker: other.identity, terminal: nil)
+        ]
+        let shell = output(first, "b055a1l6o")
+        var frame = ClaudeDiscoveryFrame(restrictToKnownConversations: true)
+        frame.inventory.value = [selected]
+        frame.registrations.value = ClaudeDiscovery.registrationsInScope(registrations, cliInventory: [selected], desktopOnly: false)
+        frame.processes.value = [desktop.1, work, other, process(201, parent: 200, started: 6, outputs: [shell]),
+                                 process(401, parent: 1, started: 22, marker: UUID())]
+        frame.taskRecords.value = [shell: 7]
+        var discovery = ClaudeReconciler()
+        let snapshot = discovery.update(frame)
+        XCTAssertEqual(snapshot.conversations.map(\.title), ["Work", "Desktop"])
+        XCTAssertEqual(snapshot.conversations.last?.location, .desktop(ClaudeDesktopID(host)))
+
+        frame.inventory.value = []
+        frame.registrations.value = ClaudeDiscovery.registrationsInScope(registrations, cliInventory: [], desktopOnly: false)
+        XCTAssertEqual(discovery.update(frame).conversations.map(\.title), ["Desktop"])
+    }
+
     func testLiveAndHistoricalEvidenceDoNotCrossProcessGenerations() {
         let shell = output(first, "b7607rzh4")
         let alpha = root(first, pid: 200, started: 5, title: "First", host: host)

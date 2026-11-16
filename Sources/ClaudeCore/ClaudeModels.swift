@@ -186,4 +186,5 @@ struct ClaudeDiscoveryFrame: Sendable {
     var processes: ClaudeRead<[ClaudeObservedProcess]> = .init(value: [])
     // Unix seconds when Claude confirmed that each shell task went to the background.
     var taskRecords: ClaudeRead<[ClaudeTaskOutput: TimeInterval]> = .init(value: [:])
+    var restrictToKnownConversations = false
 }

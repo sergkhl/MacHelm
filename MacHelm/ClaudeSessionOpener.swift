@@ -28,7 +28,7 @@ struct ClaudeSessionOpener {
         case .terminal(let terminal):
             if let terminal, focusScript(for: terminal) != nil { return .openSession }
         case .detached:
-            if installation?.executable != nil, workspace.urlForApplication(withBundleIdentifier: Self.ghostty) != nil {
+            if installation?.canLaunch == true, workspace.urlForApplication(withBundleIdentifier: Self.ghostty) != nil {
                 return .openSession
             }
             return .copyAttachCommand
@@ -54,18 +54,20 @@ struct ClaudeSessionOpener {
             }.value
             return focused ? nil : "Couldn’t focus the exact tab in \(terminal.name)."
         case (.openSession, .detached(let id)):
-            guard let ghostty = workspace.urlForApplication(withBundleIdentifier: Self.ghostty), installation.executable != nil else {
+            guard let ghostty = workspace.urlForApplication(withBundleIdentifier: Self.ghostty), installation.canLaunch else {
                 return "Ghostty or the Claude command is unavailable."
             }
-            // Launch arguments apply to a fresh Ghostty instance. Its -e mode
-            // opens the attach command in a dedicated window and exits with it.
+            // Launch arguments apply to a fresh Ghostty instance.
             let configuration = NSWorkspace.OpenConfiguration()
-            configuration.arguments = ["-e"] + Self.attachArguments(id, installation: installation)
+            configuration.arguments = installation.ghosttyArguments(for: id)
+            if installation.command.usesZsh {
+                configuration.environment = installation.environment.filter { ["ZDOTDIR", "PATH", "CLAUDE_CONFIG_DIR"].contains($0.key) }
+            }
             configuration.createsNewApplicationInstance = true
             let launched = try? await workspace.openApplication(at: ghostty, configuration: configuration)
             return launched == nil ? "Couldn’t launch Ghostty." : nil
         case (.copyAttachCommand, .detached(let id)):
-            copy(Self.shellCommand(Self.attachArguments(id, installation: installation)))
+            copy(installation.copyAttachCommand(id))
             return "Attach command copied."
         default:
             return "The session’s opening options changed."
@@ -107,23 +109,6 @@ struct ClaudeSessionOpener {
         case "com.googlecode.iterm2": return Self.focusITerm
         default: return nil
         }
-    }
-
-    private static func attachArguments(_ id: ClaudeAttachID, installation: ClaudeInstallation) -> [String] {
-        let arguments = [installation.executable?.path ?? "claude", "attach", id.value]
-        if let config = installation.configOverride {
-            return ["/usr/bin/env", "CLAUDE_CONFIG_DIR=" + config] + arguments
-        }
-        return arguments
-    }
-
-    private static func shellCommand(_ arguments: [String]) -> String {
-        arguments.map { argument in
-            if !argument.isEmpty, argument.utf8.allSatisfy({ byte in
-                (48...57).contains(byte) || (65...90).contains(byte) || (97...122).contains(byte) || "_/-=.".utf8.contains(byte)
-            }) { return argument }
-            return "'" + argument.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        }.joined(separator: " ")
     }
 
     nonisolated private static func runScript(_ source: String, _ arguments: [String]) -> String? {

@@ -28,7 +28,8 @@ struct ClaudeReconciler {
         let sessionReadsComplete = frame.inventory.quality == .complete && frame.registrations.quality == .complete
         if frame.processes.quality != .unavailable {
             work = attributedWork(in: processes, roots: roots, metadata: metadata, receipts: frame.taskRecords.value,
-                                  sessions: sessions, sessionReadsComplete: sessionReadsComplete)
+                                  sessions: sessions, sessionReadsComplete: sessionReadsComplete,
+                                  restrictToKnownConversations: frame.restrictToKnownConversations)
         }
 
         var visible = sessions.filter { _, session in Self.isVisibleWithoutJobs(session) }
@@ -146,7 +147,8 @@ struct ClaudeReconciler {
 
     private func attributedWork(in processes: [Int32: ClaudeObservedProcess], roots: [Int32: Set<ClaudeConversationID>],
                                 metadata: [ClaudeConversationID: ClaudeConversation], receipts: [ClaudeTaskOutput: TimeInterval],
-                                sessions: [ClaudeConversationID: ClaudeConversation], sessionReadsComplete: Bool) -> [ProcessIdentity: Work] {
+                                sessions: [ClaudeConversationID: ClaudeConversation], sessionReadsComplete: Bool,
+                                restrictToKnownConversations: Bool) -> [ProcessIdentity: Work] {
         // Foreground Bash also opens a .output file. Require the structured
         // background receipt and a matching live writer, or an unchanged writer
         // from a previous refresh whose receipt has since rolled out of the tail.
@@ -180,12 +182,14 @@ struct ClaudeReconciler {
                 previous.output == nil || previous.parent != process.parent ||
                     (orphan && sessionReadsComplete && previous.confirmedOwner.flatMap { sessions[$0] } == nil)
             } ?? false
-            let independent = orphan && process.parent <= 1 && process.sessionMarker != nil
+            let marker = process.sessionMarker.map(ClaudeConversationID.session)
+            let markerInScope = marker.map { !restrictToKnownConversations || metadata[$0] != nil } ?? false
+            let independent = orphan && process.parent <= 1 && markerInScope
             guard !outputs.isEmpty || mayOutliveTask || independent else { continue }
 
             var claims = ownerRoots
             claims.formUnion(outputs.map { .session($0.sessionID) })
-            if let marker = process.sessionMarker { claims.insert(.session(marker)) }
+            if let marker { claims.insert(marker) }
             if let prior = prior?.confirmedOwner { claims.insert(prior) }
             let resolved = claims.count == 1 ? claims.first.flatMap { metadata[$0]?.id } : nil
             let output = outputs.count == 1 ? outputs.first : nil

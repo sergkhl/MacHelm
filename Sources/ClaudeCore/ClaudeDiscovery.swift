@@ -5,6 +5,7 @@ import ActivityCore
 #endif
 
 struct ClaudeInstallation: Sendable {
+    let command: ClaudeCLICommand
     let executable: URL?
     let configDirectory: URL
     let configOverride: String?
@@ -12,8 +13,9 @@ struct ClaudeInstallation: Sendable {
     let environment: [String: String]
     let home: URL
 
-    init(environment: [String: String] = ProcessInfo.processInfo.environment,
+    init(command: ClaudeCLICommand = .standard, environment: [String: String] = ProcessInfo.processInfo.environment,
          home: URL = FileManager.default.homeDirectoryForCurrentUser) {
+        self.command = command
         self.home = home
         let paths = (environment["PATH"] ?? "").split(separator: ":").map(String.init) + [
             home.appendingPathComponent(".local/bin").path, home.appendingPathComponent(".claude/local").path,
@@ -21,22 +23,27 @@ struct ClaudeInstallation: Sendable {
         ]
         executable = paths.lazy.filter { $0.hasPrefix("/") }.map { URL(fileURLWithPath: $0).appendingPathComponent("claude") }
             .first { FileManager.default.isExecutableFile(atPath: $0.path) }
-        func directory(_ value: String) -> URL {
-            if value == "~" { return home }
-            if value.hasPrefix("~/") { return home.appendingPathComponent(String(value.dropFirst(2)), isDirectory: true) }
-            return value.hasPrefix("/") ? URL(fileURLWithPath: value, isDirectory: true) : home.appendingPathComponent(value, isDirectory: true)
+        configOverride = environment["CLAUDE_CONFIG_DIR"].flatMap {
+            $0.isEmpty ? nil : Self.directory($0, relativeTo: home, home: home).standardizedFileURL.path
         }
-        configOverride = environment["CLAUDE_CONFIG_DIR"].flatMap { $0.isEmpty ? nil : directory($0).standardizedFileURL.path }
-        configDirectory = configOverride.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? home.appendingPathComponent(".claude")
+        configDirectory = configOverride.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? home.appendingPathComponent(".claude", isDirectory: true)
         let tempPaths = ["/private/tmp", "/tmp"] + [environment["CLAUDE_CODE_TMPDIR"]].compactMap { $0 }
-        outputRoots = Set(tempPaths.flatMap { path in
-            let root = directory(path).appendingPathComponent("claude-\(getuid())")
-            // Kernel vnode paths use /private/tmp, while Foundation may resolve it to /tmp.
-            return [root.path, root.resolvingSymlinksInPath().path]
-        })
+        outputRoots = Set(tempPaths.flatMap { Self.taskOutputRoots(in: Self.directory($0, relativeTo: home, home: home)) })
         var environment = environment
         environment["CLAUDE_CONFIG_DIR"] = configOverride
         self.environment = environment
+    }
+
+    static func directory(_ value: String, relativeTo base: URL, home: URL) -> URL {
+        if value == "~" { return home }
+        if value.hasPrefix("~/") { return home.appendingPathComponent(String(value.dropFirst(2)), isDirectory: true) }
+        return value.hasPrefix("/") ? URL(fileURLWithPath: value, isDirectory: true) : base.appendingPathComponent(value, isDirectory: true)
+    }
+
+    static func taskOutputRoots(in directory: URL) -> [String] {
+        let root = directory.appendingPathComponent("claude-\(getuid())")
+        // Kernel vnode paths use /private/tmp, while Foundation may resolve it to /tmp.
+        return [root.path, root.resolvingSymlinksInPath().path]
     }
 }
 
@@ -46,19 +53,95 @@ struct ClaudeDiscovery: Sendable {
     func read(pass: ProcessPass, installation: ClaudeInstallation) -> ClaudeDiscoveryFrame {
         let inventory = readInventory(installation)
         let sampled = pass.own.map(\.description).filter { $0.isOwn && $0.identity.startedAt > 0 }
-        let processes = readProcesses(sampled, outputRoots: installation.outputRoots)
-        let registrations = readRegistrations(in: installation.configDirectory, sampled: sampled, processes: processes.value)
+        let selectedCLIOnly = installation.command.usesZsh
+        let locations = selectedCLIOnly ? profileLocations(for: inventory.value, sampled: sampled, installation: installation) : [:]
+        let outputRoots = installation.outputRoots.union(locations.values.flatMap(\.outputRoots))
+        let processes = readProcesses(sampled, outputRoots: outputRoots)
+        let desktopDirectory = installation.home.appendingPathComponent(".claude", isDirectory: true)
+        let configs = Set([installation.configDirectory, desktopDirectory]).union(locations.values.compactMap(\.config))
+        let registrationsByConfig = configs.map { config in
+            let read = readRegistrations(in: config, sampled: sampled, processes: processes.value)
+            let cliInventory = selectedCLIOnly ? inventory.value : nil
+            let desktopOnly = !selectedCLIOnly && config != installation.configDirectory
+            let registrations = Self.registrationsInScope(read.value, cliInventory: cliInventory, desktopOnly: desktopOnly)
+            return (config: config, quality: read.quality, registrations: registrations)
+        }
+        let registrationQuality: ClaudeReadQuality
+        if registrationsByConfig.allSatisfy({ $0.quality == .unavailable }) {
+            registrationQuality = .unavailable
+        } else {
+            registrationQuality = registrationsByConfig.contains { $0.quality != .complete } ? .partial : .complete
+        }
+
         let outputs = Set(processes.value.flatMap(\.outputs))
-        let sessions = Set(inventory.value.compactMap(\.sessionID) + registrations.value.compactMap(\.record.sessionID))
-        return ClaudeDiscoveryFrame(inventory: inventory, registrations: registrations, processes: processes,
-                                    taskRecords: ClaudeTaskRecords.read(outputs, in: installation.configDirectory, sessions: sessions))
+        let registrations = registrationsByConfig.flatMap(\.registrations)
+        let registeredElsewhere = Set(registrationsByConfig.filter { $0.config != installation.configDirectory }
+            .flatMap(\.registrations).compactMap(\.record.sessionID))
+        var taskRecords = ClaudeRead<[ClaudeTaskOutput: TimeInterval]>(value: [:])
+        for source in registrationsByConfig {
+            var sessions = Set(source.registrations.compactMap(\.record.sessionID))
+            let broadRead = !selectedCLIOnly && source.config == installation.configDirectory
+            let listedHere = inventory.value.filter { agent in
+                if broadRead { return agent.sessionID.map { !registeredElsewhere.contains($0) } ?? false }
+                return agent.pid.flatMap { locations[$0]?.config } == source.config
+            }
+            sessions.formUnion(listedHere.compactMap(\.sessionID))
+            let matchingOutputs = outputs.filter { output in
+                broadRead ? !registeredElsewhere.contains(output.sessionID) : sessions.contains(output.sessionID)
+            }
+            let read = ClaudeTaskRecords.read(matchingOutputs, in: source.config, sessions: sessions)
+            taskRecords.value.merge(read.value, uniquingKeysWith: max)
+            if read.quality != .complete { taskRecords.quality = .partial }
+        }
+        return ClaudeDiscoveryFrame(inventory: inventory, registrations: .init(value: registrations, quality: registrationQuality),
+                                    processes: processes, taskRecords: taskRecords, restrictToKnownConversations: selectedCLIOnly)
     }
 
     func readInventory(_ installation: ClaudeInstallation) -> ClaudeRead<[ClaudeSessionRecord]> {
-        guard let executable = installation.executable else { return .init(value: [], quality: .missingExecutable) }
-        guard let data = ClaudeCommand.run(executable, arguments: ["agents", "--json"], environment: installation.environment,
-                                          directory: installation.home, timeout: 2) else { return .init(value: [], quality: .unavailable) }
+        guard installation.canLaunch else { return .init(value: [], quality: .missingExecutable) }
+        guard let data = installation.inventoryOutput() else { return .init(value: [], quality: .unavailable) }
         return Self.decodeInventory(data)
+    }
+
+    private struct ProfileLocation {
+        let config: URL?
+        let outputRoots: [String]
+    }
+
+    // The inventory identifies the CLI's sessions. Inspect its live workers for
+    // the corresponding metadata directories, including those set inside a shell function.
+    private func profileLocations(for inventory: [ClaudeSessionRecord], sampled: [ProcessDescription],
+                                  installation: ClaudeInstallation) -> [Int32: ProfileLocation] {
+        let identities = Dictionary(sampled.map { ($0.identity.pid, $0.identity) }, uniquingKeysWith: { first, _ in first })
+        var locations: [Int32: ProfileLocation] = [:]
+        for agent in inventory {
+            guard let pid = agent.pid, locations[pid] == nil, let identity = identities[pid],
+                  let info = liveInfo(identity), let started = agent.startedAt,
+                  started / 1_000 + 0.001 >= Double(info.pbi_start_tvsec) + Double(info.pbi_start_tvusec) / 1_000_000 else { continue }
+            let home = installation.home
+            let base = agent.cwd.map { ClaudeInstallation.directory($0, relativeTo: home, home: home) } ?? home
+            let config = transport.environmentValue("CLAUDE_CONFIG_DIR", of: pid)
+                .flatMap { $0.isEmpty ? nil : ClaudeInstallation.directory($0, relativeTo: base, home: home) }
+            let temp = transport.environmentValue("CLAUDE_CODE_TMPDIR", of: pid)
+                .flatMap { $0.isEmpty ? nil : ClaudeInstallation.directory($0, relativeTo: base, home: home) }
+            guard liveInfo(identity) != nil else { continue }
+            locations[pid] = ProfileLocation(config: config?.standardizedFileURL, outputRoots: temp.map(ClaudeInstallation.taskOutputRoots(in:)) ?? [])
+        }
+        return locations
+    }
+
+    static func registrationsInScope(_ registrations: [ClaudeRegistration], cliInventory: [ClaudeSessionRecord]?,
+                                     desktopOnly: Bool) -> [ClaudeRegistration] {
+        let inventoryByPID = Dictionary(grouping: cliInventory ?? []) { $0.pid }
+        return registrations.filter { registration in
+            if registration.record.entrypoint == "claude-desktop" { return true }
+            if desktopOnly { return false }
+            if cliInventory == nil { return true }
+            return inventoryByPID[registration.worker.pid, default: []].contains { agent in
+                if let session = agent.sessionID { return registration.record.sessionID == session }
+                return agent.attachID.map { registration.record.attachID == $0 } ?? false
+            }
+        }
     }
 
     static func decodeInventory(_ data: Data) -> ClaudeRead<[ClaudeSessionRecord]> {

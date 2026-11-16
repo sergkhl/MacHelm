@@ -46,7 +46,7 @@ struct ClaudePage: View {
         var messages: [String] = []
         switch snapshot.inventory {
         case .missingExecutable: messages.append("Claude Code was not found. Detached sessions and session states may be incomplete.")
-        case .unavailable: messages.append("Claude’s session list is unavailable. Session states may be out of date.")
+        case .unavailable: messages.append("Couldn’t read sessions with \(store.cliCommand.name). Session states may be out of date.")
         case .partial: messages.append("Claude’s session list is incomplete. Some session states may be out of date.")
         case .complete: break
         }

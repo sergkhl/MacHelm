@@ -8,8 +8,11 @@ struct ToolkitSettingsView: View {
     @ObservedObject var fan: FanControlService
     @ObservedObject var activity: ActivityStore
     @ObservedObject var storage: StorageService
+    @ObservedObject var claude: ClaudeStore
     // Read when the window opens and when asked: macOS gives no notice of a change.
     @State private var fullDiskAccess: Bool? = StorageService.fullDiskAccess
+    @State private var claudeCommand = ""
+    @State private var invalidClaudeCommand = false
 
     var body: some View {
         Form {
@@ -61,6 +64,21 @@ struct ToolkitSettingsView: View {
                 }
                 .accessibilityIdentifier("storage-full-disk-access")
             }
+            Section("Claude") {
+                HStack {
+                    TextField("CLI command", text: $claudeCommand, prompt: Text("claude"))
+                        .onSubmit(saveClaudeCommand)
+                        .onChange(of: claudeCommand) { _, _ in invalidClaudeCommand = false }
+                        .accessibilityIdentifier("claude-cli-command")
+                    Button("Save", action: saveClaudeCommand)
+                        .disabled(claudeCommand == claude.cliCommand.name)
+                    InfoButton("Enter a zsh command or alias, such as claude-work, to list and open sessions from its profile.",
+                               label: "About the Claude CLI command")
+                }
+                if invalidClaudeCommand {
+                    Text("Enter a single zsh command name, such as claude or claude-work.").font(.caption)
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(width: 460)
@@ -68,7 +86,17 @@ struct ToolkitSettingsView: View {
         .onAppear {
             services.refreshOpenAtLogin()
             fullDiskAccess = StorageService.fullDiskAccess
+            claudeCommand = claude.cliCommand.name
         }
+    }
+
+    private func saveClaudeCommand() {
+        guard let command = ClaudeCLICommand(claudeCommand) else {
+            invalidClaudeCommand = true
+            return
+        }
+        claude.saveCLICommand(command)
+        claudeCommand = command.name
     }
 }
 
@@ -91,7 +119,8 @@ final class SettingsWindow {
 
     private func makeWindow() -> NSWindow {
         let content = NSHostingController(rootView: ToolkitSettingsView(services: host.startupServices, fan: host.cooling,
-                                                                        activity: host.activity, storage: host.storage))
+                                                                        activity: host.activity, storage: host.storage,
+                                                                        claude: host.claude))
         let window = NSWindow(contentViewController: content)
         window.title = "MacHelm Settings"
         window.styleMask = [.titled, .closable]

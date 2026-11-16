@@ -7,6 +7,7 @@ final class ClaudeStore: ObservableObject {
     @Published private(set) var refreshingOnShow = false
     @Published private(set) var opening: ClaudeConversationID?
     @Published private(set) var feedback: Feedback?
+    @Published private(set) var cliCommand: ClaudeCLICommand
 
     struct Feedback {
         let id: ClaudeConversationID
@@ -14,15 +15,34 @@ final class ClaudeStore: ObservableObject {
     }
 
     private let activity: ActivityStore
+    private let defaults: UserDefaults
     private let discovery = ClaudeDiscovery()
     private let opener = ClaudeSessionOpener()
     private var reconciler = ClaudeReconciler()
-    private var refreshTask: Task<Void, Never>?
+    private static let cliCommandKey = "ClaudeCLICommand"
+    private var commandGeneration = 0
+    private var refreshTask: (generation: Int, task: Task<Void, Never>)?
     private var watching: Task<Void, Never>?
     private var installation: ClaudeInstallation?
 
-    init(activity: ActivityStore) {
+    init(activity: ActivityStore, defaults: UserDefaults = .standard) {
         self.activity = activity
+        self.defaults = defaults
+        cliCommand = defaults.string(forKey: Self.cliCommandKey).flatMap(ClaudeCLICommand.init) ?? .standard
+    }
+
+    func saveCLICommand(_ command: ClaudeCLICommand) {
+        guard command != cliCommand else { return }
+        defaults.set(command.name, forKey: Self.cliCommandKey)
+        cliCommand = command
+        commandGeneration += 1
+        reconciler = ClaudeReconciler()
+        installation = nil
+        snapshot = nil
+        feedback = nil
+        if watching != nil {
+            Task { await refresh() }
+        }
     }
 
     func setVisible(_ visible: Bool) {
@@ -42,23 +62,26 @@ final class ClaudeStore: ObservableObject {
     }
 
     private func refresh() async {
-        if let existing = refreshTask {
-            await existing.value
-            return
+        while let existing = refreshTask {
+            await existing.task.value
+            if existing.generation == commandGeneration { return }
         }
+        let generation = commandGeneration
+        let command = cliCommand
         let pending = Task { [discovery] in
             let processes = await activity.readProcesses()
             let (installation, frame) = await Task.detached(priority: .utility) {
-                let installation = ClaudeInstallation()
+                let installation = ClaudeInstallation(command: command)
                 return (installation, discovery.read(pass: processes, installation: installation))
             }.value
+            refreshTask = nil
+            guard generation == commandGeneration else { return }
             self.installation = installation
             let next = reconciler.update(frame)
             if next != snapshot { snapshot = next }
             if refreshingOnShow { refreshingOnShow = false }
-            refreshTask = nil
         }
-        refreshTask = pending
+        refreshTask = (generation, pending)
         await pending.value
     }
 
@@ -75,15 +98,17 @@ final class ClaudeStore: ObservableObject {
             return
         }
         opening = row.id
+        let generation = commandGeneration
         Task {
             await refresh()
             defer { opening = nil }
+            guard generation == commandGeneration else { return }
             guard let current = reconciler.active[row.id], let installation else {
                 feedback = Feedback(id: row.id, text: "This session is no longer available.")
                 return
             }
             let message = await opener.perform(action, for: current, installation: installation)
-            if let message { feedback = Feedback(id: row.id, text: message) }
+            if generation == commandGeneration, let message { feedback = Feedback(id: row.id, text: message) }
         }
     }
 }

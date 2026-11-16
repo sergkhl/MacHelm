@@ -252,6 +252,7 @@
 				9FC6033E2C3A037718D62E94,
 				C145E8F0FEA98AB50A26F1CE,
 				D4F63841B10FBCEE069CE5EE,
+				9E621AD594F50611BDE61A85,
 				ED0D4D8FD93DFB28D3EEDFEA,
 				8ED7DA9B1FC9D5735C2AB5FC,
 				6447AE0885BFD28521ED87F6,
@@ -630,7 +631,7 @@
 			"buildSettings" = {
 				"CODE_SIGN_IDENTITY" = "Apple Development";
 				"CODE_SIGN_STYLE" = "Manual";
-				"CURRENT_PROJECT_VERSION" = "7";
+				"CURRENT_PROJECT_VERSION" = "8";
 				"DEAD_CODE_STRIPPING" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
@@ -671,7 +672,7 @@
 			"buildSettings" = {
 				"CODE_SIGN_IDENTITY" = "Apple Development";
 				"CODE_SIGN_STYLE" = "Manual";
-				"CURRENT_PROJECT_VERSION" = "7";
+				"CURRENT_PROJECT_VERSION" = "8";
 				"DEAD_CODE_STRIPPING" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
@@ -903,7 +904,7 @@
 			"buildSettings" = {
 				"CODE_SIGN_IDENTITY" = "Apple Development";
 				"CODE_SIGN_STYLE" = "Manual";
-				"CURRENT_PROJECT_VERSION" = "7";
+				"CURRENT_PROJECT_VERSION" = "8";
 				"DEAD_CODE_STRIPPING" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
@@ -1156,7 +1157,7 @@
 			"buildSettings" = {
 				"CODE_SIGN_IDENTITY" = "Apple Development";
 				"CODE_SIGN_STYLE" = "Manual";
-				"CURRENT_PROJECT_VERSION" = "7";
+				"CURRENT_PROJECT_VERSION" = "8";
 				"DEAD_CODE_STRIPPING" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
@@ -1254,7 +1255,7 @@
 			"buildSettings" = {
 				"CODE_SIGN_IDENTITY" = "Apple Development";
 				"CODE_SIGN_STYLE" = "Manual";
-				"CURRENT_PROJECT_VERSION" = "7";
+				"CURRENT_PROJECT_VERSION" = "8";
 				"DEAD_CODE_STRIPPING" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
@@ -1356,6 +1357,10 @@
 			"name" = "ProcessModels.swift";
 			"path" = "Sources/ActivityCore/ProcessModels.swift";
 			"sourceTree" = "SOURCE_ROOT";
+		};
+		9E621AD594F50611BDE61A85 = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = E6B828A16064BECED6C9268B;
 		};
 		9FC6033E2C3A037718D62E94 = {
 			"isa" = "PBXBuildFile";
@@ -1618,7 +1623,7 @@
 			"buildSettings" = {
 				"CODE_SIGN_IDENTITY" = "Apple Development";
 				"CODE_SIGN_STYLE" = "Manual";
-				"CURRENT_PROJECT_VERSION" = "7";
+				"CURRENT_PROJECT_VERSION" = "8";
 				"DEAD_CODE_STRIPPING" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
@@ -1713,7 +1718,7 @@
 			"buildSettings" = {
 				"CODE_SIGN_IDENTITY" = "Apple Development";
 				"CODE_SIGN_STYLE" = "Manual";
-				"CURRENT_PROJECT_VERSION" = "7";
+				"CURRENT_PROJECT_VERSION" = "8";
 				"DEAD_CODE_STRIPPING" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
@@ -1876,10 +1881,18 @@
 			"name" = "Frameworks";
 			"sourceTree" = "<group>";
 		};
+		E6B828A16064BECED6C9268B = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"name" = "ClaudeLauncher.swift";
+			"path" = "Sources/ClaudeCore/ClaudeLauncher.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
 		E8D84F2F9C6966C7C6C30056 = {
 			"isa" = "PBXGroup";
 			"children" = (
 				0849404203ED12BC216184CB,
+				E6B828A16064BECED6C9268B,
 				A8D85A859E8C0135F59B2E5A,
 				AAD62C7F84DAE3D5BF769C98,
 				82098745F28B70F3E3152CC7,
@@ -1993,7 +2006,7 @@
 			"buildSettings" = {
 				"CODE_SIGN_IDENTITY" = "Apple Development";
 				"CODE_SIGN_STYLE" = "Manual";
-				"CURRENT_PROJECT_VERSION" = "7";
+				"CURRENT_PROJECT_VERSION" = "8";
 				"DEAD_CODE_STRIPPING" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
