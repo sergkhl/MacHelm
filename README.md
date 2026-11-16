@@ -4,7 +4,7 @@ A native macOS dashboard and menu bar for cooling, power, process activity, stor
 
 Inspect what is using the Mac, review cleanup targets, and manage personal services from one place. Each tool makes its effect explicit: opening a page reads state; changing a control or confirming a cleanup performs the action.
 
-**Version 0.1, build 9.** This is a source release for macOS 26 or later. Build it with Xcode 26 or later. A signed, notarized application download is not included in this release.
+**Version 0.1, build 10.** This is a source release for macOS 26 or later. Build it with Xcode 26 or later. A signed, notarized application download is not included in this release.
 
 ## Tools
 
@@ -15,7 +15,7 @@ Inspect what is using the Mac, review cleanup targets, and manage personal servi
 | **Activity** | Shows the five heaviest process groups for CPU, memory, GPU, energy, and disk over a selected time window. Expand a row to inspect its processes, quit an app, or open Activity Monitor. |
 | **Storage** | Scans developer caches, simulators, runtimes, and Android emulators, as well as app caches, leftover update downloads, idle Codex chats and Claude Code sessions, merged or idle worktrees, device backups, and the Trash. Review the measured targets and confirm a cleanup; what cannot be restored starts unchecked. The [Python cleanup utility](Storage/README.md) also works in a terminal. |
 | **Startup Services** | Imports your LaunchAgents or adds programs and scripts. Manage their login behavior and current-session state while keeping each service's launchd rules. See [Startup Services](docs/startup-services.md). |
-| **Claude** | Lists sessions Claude reports as needing input, oldest first. **Running shell work** groups verified jobs by conversation, including Desktop shell jobs without a background start record. Expand a job for worker names and PIDs, or open the owning session for Claude’s full task list and controls. See [Claude background work](docs/claude-background-work-plan.md). |
+| **Claude** | **Needs input** lists recent pending questions, replies asking for a decision, and unsent drafts, oldest session first. Items with an unknown time also appear. **Running shell work** groups verified jobs by conversation, including Desktop shell jobs without a background start record. Expand a job for worker names and PIDs, or open the owning session for Claude’s full task list and controls. See [Claude background work](docs/claude-background-work-plan.md). |
 | **Tweaks** | Cursor hide uses **Ctrl+Option+Command+H** (`⌃⌥⌘H`) to hide or restore the system pointer, including while another app is active. This experimental feature uses private WindowServer APIs; see [behavior and compatibility](docs/cursor-hide.md). |
 
 The dashboard opens on Overview. Click a card heading to open its detailed page, or select it in the sidebar. General explanations are available from info buttons; current readings, status and problems stay visible. Open Claude with `⌘8`, Tweaks with `⌘7`, and Settings with `⌘,`. In Settings, Claude's **CLI command** defaults to `claude`. Save a zsh alias or function such as `claude-work` to list and attach to sessions from its profile. Claude Desktop sessions keep their own opening actions.

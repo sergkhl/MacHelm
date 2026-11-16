@@ -49,9 +49,14 @@ struct ClaudeInstallation: Sendable {
 
 struct ClaudeDiscovery: Sendable {
     private let transport = DarwinProcessTransport()
+    private let inputReader = ClaudeInputDiscovery()
 
     func read(pass: ProcessPass, installation: ClaudeInstallation) -> ClaudeDiscoveryFrame {
-        let inventory = readInventory(installation)
+        var inventory = readInventory(installation, includeCompleted: true)
+        if inventory.quality == .unavailable {
+            inventory = readInventory(installation)
+            if inventory.quality == .complete { inventory.quality = .partial }
+        }
         let sampled = pass.own.map(\.description).filter { $0.isOwn && $0.identity.startedAt > 0 }
         let selectedCLIOnly = installation.command.usesZsh
         let locations = selectedCLIOnly ? profileLocations(for: inventory.value, sampled: sampled, installation: installation) : [:]
@@ -96,16 +101,28 @@ struct ClaudeDiscovery: Sendable {
         }
 
         let registered = registrations.map(\.record)
-        let waiting = Set((inventory.value + registered).filter { $0.activity == .needsInput }.compactMap(\.sessionID))
+        let records = inventory.value + registered
+        let input = inputReader.read(home: installation.home, records: records, configs: configs, at: Date())
+        let waiting = Set(records.filter { $0.activity == .needsInput }.compactMap(\.sessionID))
+        let replyIDs = Set(input.value.transcripts.compactMap { $0.value.replies.isEmpty ? nil : $0.key })
+        let draftIDs = Set(input.value.drafts.keys.compactMap { id -> UUID? in
+            if case .session(let uuid) = id { return uuid }
+            return nil
+        })
         let desktop = registered.filter { $0.entrypoint == "claude-desktop" }
-        let desktopWaiting = desktop.filter { $0.sessionID.map(waiting.contains) ?? false }
-        var dates = ClaudeSessionDates.cliDates(for: waiting.subtracting(desktop.compactMap(\.sessionID)), configs: configs)
+        let desktopIDs = Set(desktop.compactMap(\.sessionID)).union(input.value.desktop.values.compactMap(\.sessionID))
+        let desktopWaiting = desktop.filter { record in
+            guard let id = record.sessionID else { return false }
+            return waiting.contains(id) && input.value.desktop[.session(id)] == nil
+        }
+        let cliInputIDs = waiting.union(replyIDs).union(draftIDs).subtracting(desktopIDs)
+        var dates = ClaudeSessionDates.cliDates(for: cliInputIDs, configs: configs)
         dates.merge(ClaudeSessionDates.desktopDates(for: desktopWaiting, home: installation.home)) { _, desktopDate in
             desktopDate
         }
         return ClaudeDiscoveryFrame(inventory: inventory, registrations: .init(value: registrations, quality: registrationQuality),
                                     processes: processes, taskRecords: taskRecords, creationDates: dates,
-                                    restrictToKnownConversations: selectedCLIOnly)
+                                    restrictToKnownConversations: selectedCLIOnly, input: input)
     }
 
     private func readShellLaunches(from processes: [ClaudeObservedProcess], registrations: [ClaudeRegistration])
@@ -131,9 +148,11 @@ struct ClaudeDiscovery: Sendable {
         return launches.filter { !ambiguous.contains($0.key) }
     }
 
-    func readInventory(_ installation: ClaudeInstallation) -> ClaudeRead<[ClaudeSessionRecord]> {
+    func readInventory(_ installation: ClaudeInstallation, includeCompleted: Bool = false) -> ClaudeRead<[ClaudeSessionRecord]> {
         guard installation.canLaunch else { return .init(value: [], quality: .missingExecutable) }
-        guard let data = installation.inventoryOutput() else { return .init(value: [], quality: .unavailable) }
+        guard let data = installation.inventoryOutput(includeCompleted: includeCompleted) else {
+            return .init(value: [], quality: .unavailable)
+        }
         return Self.decodeInventory(data)
     }
 

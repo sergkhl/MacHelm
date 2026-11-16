@@ -5,13 +5,22 @@ struct ClaudePage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let snapshot = store.snapshot {
-                let waiting = snapshot.conversations.filter { $0.activity == .needsInput }
-                if !waiting.isEmpty {
-                    ToolPanel(title: "Needs input", symbol: "person.crop.circle.badge.exclamationmark") {
-                        rows(waiting, jobs: { _ in [] })
+            ToolPanel(title: "Needs input", symbol: "person.crop.circle.badge.exclamationmark") {
+                if let snapshot = store.snapshot {
+                    let waiting = snapshot.conversations.filter { !$0.inputItems.isEmpty }
+                    if waiting.isEmpty {
+                        Text("No sessions need input")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 8)
+                    } else {
+                        rows(waiting, showingInput: true, jobs: { _ in [] })
                     }
+                } else {
+                    Text("Reading Claude sessions…").font(.callout).foregroundStyle(.secondary).padding(.vertical, 12)
                 }
+            }
+            if let snapshot = store.snapshot {
                 let runningShell = snapshot.conversations.filter { $0.jobs.contains(where: \.isShell) }
                 ToolPanel(title: "Running shell work", symbol: "terminal") {
                     Text("Claude’s full task list is unavailable.")
@@ -28,7 +37,7 @@ struct ClaudePage: View {
                     }
                 }
                 let other = snapshot.conversations.filter { row in
-                    row.jobs.contains { !$0.isShell } || (row.detached && row.activity != .needsInput && row.jobs.isEmpty)
+                    row.jobs.contains { !$0.isShell } || (row.detached && row.inputItems.isEmpty && row.jobs.isEmpty)
                 }
                 if !other.isEmpty {
                     ToolPanel(title: "Background Work", symbol: "square.stack.3d.up") {
@@ -37,7 +46,7 @@ struct ClaudePage: View {
                 }
             } else {
                 ToolPanel(title: "Running shell work", symbol: "terminal") {
-                    Text("Reading Claude sessions…").font(.callout).foregroundStyle(.secondary).padding(.vertical, 12)
+                    Text("Reading shell work…").font(.callout).foregroundStyle(.secondary).padding(.vertical, 12)
                 }
             }
             if let snapshot = store.snapshot {
@@ -57,11 +66,12 @@ struct ClaudePage: View {
         }
     }
 
-    private func rows(_ conversations: [ClaudeConversation], jobs: @escaping (ClaudeConversation) -> [ClaudeJob]) -> some View {
+    private func rows(_ conversations: [ClaudeConversation], showingInput: Bool = false,
+                      jobs: @escaping (ClaudeConversation) -> [ClaudeJob]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(conversations) { row in
                 if row.id != conversations.first?.id { Divider() }
-                ClaudeConversationRow(row: row, jobs: jobs(row), store: store)
+                ClaudeConversationRow(row: row, jobs: jobs(row), showingInput: showingInput, store: store)
             }
         }
         .padding(.bottom, 4)
@@ -79,6 +89,7 @@ struct ClaudePage: View {
         if snapshot.processes == .unavailable { messages.append("Process readings are unavailable. Job details may be out of date.") }
         if snapshot.processes == .partial { messages.append("Some process details are unavailable.") }
         if snapshot.taskRecords != .complete { messages.append("Some Claude task records are unavailable.") }
+        if snapshot.inputRecords != .complete { messages.append("Some Claude input records are unavailable.") }
         return messages
     }
 }
@@ -86,6 +97,7 @@ struct ClaudePage: View {
 private struct ClaudeConversationRow: View {
     let row: ClaudeConversation
     let jobs: [ClaudeJob]
+    let showingInput: Bool
     @ObservedObject var store: ClaudeStore
     @State private var expanded = false
 
@@ -102,7 +114,7 @@ private struct ClaudeConversationRow: View {
                                 Text(URL(fileURLWithPath: path).lastPathComponent)
                                     .font(.caption).foregroundStyle(.secondary).lineLimit(1).help(path)
                             }
-                            if row.activity == .needsInput, let date = row.createdAt {
+                            if showingInput, let date = row.createdAt {
                                 Text("Created \(date.formatted(date: .abbreviated, time: .shortened))")
                                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
@@ -114,7 +126,18 @@ private struct ClaudeConversationRow: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(expanded ? "Hide details for \(row.title)" : "Show details for \(row.title)")
 
-                if row.id != .unknown {
+                if showingInput {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        ForEach(ClaudeInputItem.Kind.allCases, id: \.rawValue) { kind in
+                            if row.inputItems.contains(where: { $0.kind == kind }) {
+                                Text(kind.rawValue)
+                                    .font(.caption)
+                                    .foregroundStyle(kind == .native ? Color.orange : Color.secondary)
+                            }
+                        }
+                    }
+                    .fixedSize()
+                } else if row.id != .unknown {
                     Text(row.activity.rawValue).font(.caption)
                         .foregroundStyle(row.activity == .needsInput ? Color.orange : Color.secondary)
                         .fixedSize()
@@ -170,9 +193,30 @@ private struct ClaudeConversationRow: View {
             if let path = row.path { detail("Path", path) }
             if let id = row.sessionID { detail("Session ID", id.uuidString.lowercased()) }
             if let worker = row.worker { detail("Session worker PID", String(worker.pid)) }
-            if row.activity == .needsInput, let waiting = row.waitingFor { detail("Waiting for", waiting) }
+            if showingInput {
+                ForEach(Array(row.inputItems.enumerated()), id: \.offset) { _, item in
+                    inputDetail(item)
+                }
+            }
         }
         .accessibilityElement(children: .contain)
+    }
+
+    private func inputDetail(_ item: ClaudeInputItem) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(item.kind.rawValue).fontWeight(.medium)
+            if let text = item.text {
+                Text(verbatim: text).textSelection(.enabled)
+            }
+            if let date = item.date {
+                Text(date.formatted(date: .abbreviated, time: .shortened)).foregroundStyle(.secondary)
+            } else {
+                Text(item.kind == .draft ? "Save time unknown" : "Request time unknown")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption)
+        .accessibilityElement(children: .combine)
     }
 
     private func detail(_ label: String, _ value: String) -> some View {

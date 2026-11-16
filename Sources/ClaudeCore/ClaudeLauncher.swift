@@ -21,10 +21,11 @@ struct ClaudeCLICommand: Equatable, Sendable {
 extension ClaudeInstallation {
     var canLaunch: Bool { command.usesZsh || executable != nil }
 
-    func inventoryOutput() -> Data? {
+    func inventoryOutput(includeCompleted: Bool = false) -> Data? {
         guard command.usesZsh else {
             guard let executable else { return nil }
-            return ClaudeCommand.run(executable, arguments: ["agents", "--json"], environment: environment, directory: home, timeout: 2)
+            let arguments = ["agents", "--json"] + (includeCompleted ? ["--all"] : [])
+            return ClaudeCommand.run(executable, arguments: arguments, environment: environment, directory: home, timeout: 2)
         }
 
         // An interactive login shell loads aliases and functions. Frame its
@@ -32,7 +33,7 @@ extension ClaudeInstallation {
         let marker = UUID().uuidString
         let script = """
         print -rn -- "$1"
-        if \(command.name) agents --json; then
+        if \(command.name) agents --json\(includeCompleted ? " --all" : ""); then
             print -rn -- "$1"
         else
             exit $?

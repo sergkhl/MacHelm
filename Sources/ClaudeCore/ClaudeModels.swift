@@ -40,6 +40,7 @@ struct ClaudeSessionRecord: Decodable, Sendable {
     var hostSessionId: String? = nil
     var procStart: String? = nil
     var pidDomain: String? = nil
+    var statusUpdatedAt: Double? = nil
 
     var sessionID: UUID? { sessionId.flatMap(UUID.init(uuidString:)) }
     var isDetached: Bool { kind == "background" || kind == "bg" }
@@ -83,7 +84,26 @@ enum ClaudeSessionLocation: Equatable, Sendable {
 enum ClaudeConversationID: Hashable, Sendable {
     case session(UUID)
     case detached(ClaudeAttachID)
+    case desktop(ClaudeDesktopID)
     case unknown
+}
+
+struct ClaudeInputItem: Equatable, Sendable {
+    enum Kind: String, Sendable, CaseIterable {
+        case native = "Awaiting input"
+        case reply = "Reply requested"
+        case draft = "Draft saved"
+    }
+
+    static let lookback: TimeInterval = 2 * 60 * 60
+
+    let kind: Kind
+    let text: String?
+    let date: Date?
+
+    func isRecent(at now: Date) -> Bool {
+        date.map { $0 <= now && $0 >= now.addingTimeInterval(-Self.lookback) } ?? true
+    }
 }
 
 struct ClaudeConversation: Equatable, Identifiable, Sendable {
@@ -97,6 +117,7 @@ struct ClaudeConversation: Equatable, Identifiable, Sendable {
     var location: ClaudeSessionLocation?
     var createdAt: Date?
     var jobs: [ClaudeJob] = []
+    var inputItems: [ClaudeInputItem] = []
 
     var sessionID: UUID? {
         if case .session(let id) = id { return id }
@@ -140,6 +161,7 @@ struct ClaudeSnapshot: Equatable, Sendable {
     var registrations: ClaudeReadQuality = .complete
     var processes: ClaudeReadQuality = .complete
     var taskRecords: ClaudeReadQuality = .complete
+    var inputRecords: ClaudeReadQuality = .complete
 }
 
 struct ClaudeRegistration: Sendable {
@@ -202,4 +224,5 @@ struct ClaudeDiscoveryFrame: Sendable {
     var taskRecords: ClaudeRead<[ClaudeTaskOutput: ClaudeTaskRecord]> = .init(value: [:])
     var creationDates: [UUID: Date] = [:]
     var restrictToKnownConversations = false
+    var input: ClaudeRead<ClaudeInputReading> = .init(value: .init())
 }

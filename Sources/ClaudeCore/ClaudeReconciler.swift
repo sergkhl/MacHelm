@@ -21,9 +21,9 @@ struct ClaudeReconciler {
     private var work: [ProcessIdentity: Work] = [:]
     private(set) var active: [ClaudeConversationID: ClaudeConversation] = [:]
 
-    mutating func update(_ frame: ClaudeDiscoveryFrame) -> ClaudeSnapshot {
+    mutating func update(_ frame: ClaudeDiscoveryFrame, at now: Date = Date()) -> ClaudeSnapshot {
         let processes = Dictionary(frame.processes.value.map { ($0.identity.pid, $0) }, uniquingKeysWith: { first, _ in first })
-        let (discovered, roots) = Self.sessions(in: frame, processes: processes)
+        let (discovered, roots) = Self.sessions(in: frame, processes: processes, at: now)
         let sessions = discovered.mapValues { session in
             var result = session
             result.createdAt = session.createdAt ?? known[session.id]?.createdAt
@@ -43,12 +43,16 @@ struct ClaudeReconciler {
         // A failed inventory cannot tell us that an attachable session or a
         // prompt has gone away. Only fresh observations can supply an action.
         if frame.inventory.quality != .complete {
-            for (id, old) in known where sessions[id] == nil && Self.isVisibleWithoutJobs(old) {
+            for (id, old) in known where sessions[id] == nil {
                 let lastWorker = old.worker.flatMap { processes[$0.pid]?.identity == $0 ? $0 : nil }
                 guard lastWorker != nil || frame.processes.quality == .unavailable || old.activity == .needsInput || old.activity == .working else { continue }
                 var stale = old
                 stale.worker = lastWorker
                 stale.location = nil
+                // Only an incomplete session inventory can justify retaining a
+                // previously reported wait. Drafts and replies use fresh reads.
+                stale.inputItems = old.inputItems.filter { $0.kind == .native && $0.isRecent(at: now) }
+                guard Self.isVisibleWithoutJobs(stale) else { continue }
                 visible[id] = stale
             }
         }
@@ -63,6 +67,7 @@ struct ClaudeReconciler {
                 conversation.location = nil
                 conversation.activity = id != .unknown && sessionReadsComplete ? .closed : .unknown
                 conversation.waitingFor = nil
+                conversation.inputItems = visible[id]?.inputItems ?? []
             }
             conversation.jobs = Dictionary(grouping: members, by: \.jobID).map { id, processes in
                 let titles = Set(processes.compactMap(\.title))
@@ -82,10 +87,10 @@ struct ClaudeReconciler {
         known = metadata.filter { remembered.contains($0.key) }
         return ClaudeSnapshot(conversations: visible.values.sorted(by: Self.precedes), inventory: frame.inventory.quality,
                              registrations: frame.registrations.quality, processes: frame.processes.quality,
-                             taskRecords: frame.taskRecords.quality)
+                             taskRecords: frame.taskRecords.quality, inputRecords: frame.input.quality)
     }
 
-    private static func sessions(in frame: ClaudeDiscoveryFrame, processes: [Int32: ClaudeObservedProcess])
+    private static func sessions(in frame: ClaudeDiscoveryFrame, processes: [Int32: ClaudeObservedProcess], at now: Date)
         -> ([ClaudeConversationID: ClaudeConversation], [Int32: Set<ClaudeConversationID>]) {
         let records = frame.inventory.value + frame.registrations.value.map(\.record)
         var aliases: [ClaudeAttachID: Set<UUID>] = [:]
@@ -132,13 +137,15 @@ struct ClaudeReconciler {
             if worker == nil, agents.count == 1, let pid = agent?.pid, pidClaims[pid] == [id], roots[pid] == nil {
                 worker = workerListed(by: agent, in: processes)
             }
-            let desktopActivity = record?.entrypoint == "claude-desktop" ? record?.activity : nil
-            let activity = desktopActivity.flatMap { $0 == .unknown ? nil : $0 } ??
-                agent?.activity ?? record?.activity ?? .unknown
+            let statusRecord = if let record, record.entrypoint == "claude-desktop", record.activity != .unknown {
+                record
+            } else {
+                agent ?? record
+            }
             var session = ClaudeConversation(
                 id: id, title: display(agent?.name) ?? display(record?.name) ?? "Claude session",
-                path: display(agent?.cwd) ?? display(record?.cwd), activity: activity,
-                waitingFor: display(agent?.waitingFor) ?? display(record?.waitingFor), detached: detached,
+                path: display(agent?.cwd) ?? display(record?.cwd), activity: statusRecord?.activity ?? .unknown,
+                waitingFor: display(statusRecord?.waitingFor) ?? display(record?.waitingFor), detached: detached,
                 worker: worker
             )
             session.createdAt = session.sessionID.flatMap { frame.creationDates[$0] }
@@ -152,9 +159,76 @@ struct ClaudeReconciler {
             } else {
                 session.location = .terminal(exact?.terminal)
             }
+            let registeredWaitTime = record?.activity == .needsInput ? record?.statusUpdatedAt : nil
+            let waitingSince = ClaudeInputDiscovery.date(milliseconds: statusRecord?.statusUpdatedAt ?? registeredWaitTime)
+            let stored = frame.input.value.desktop[id]
+            if case .desktop(let liveHost) = session.location, let stored, liveHost == nil || liveHost == stored.host {
+                session.createdAt = stored.createdAt ?? session.createdAt
+                session.location = .desktop(stored.host)
+            }
+            session.inputItems = Self.inputItems(for: session, from: frame.input.value, waitingSince: waitingSince, at: now)
             sessions[id] = session
         }
+
+        for (id, stored) in frame.input.value.desktop where sessions[id] == nil {
+            var session = ClaudeConversation(
+                id: id, title: display(stored.title) ?? "Claude session",
+                path: display(stored.path), activity: .idle, location: .desktop(stored.host), createdAt: stored.createdAt
+            )
+            session.inputItems = Self.inputItems(for: session, from: frame.input.value, waitingSince: nil, at: now)
+            if !session.inputItems.isEmpty { sessions[id] = session }
+        }
         return (sessions, roots)
+    }
+
+    private static func inputItems(for session: ClaudeConversation, from reading: ClaudeInputReading,
+                                   waitingSince: Date?, at now: Date) -> [ClaudeInputItem] {
+        let transcript = session.sessionID.flatMap { reading.transcripts[$0] }
+        let stored = reading.desktop[session.id]
+        let matchesDesktop: Bool
+        if let stored {
+            if case .desktop(let host) = session.location {
+                matchesDesktop = host == stored.host
+            } else {
+                matchesDesktop = false
+            }
+        } else {
+            matchesDesktop = false
+        }
+        var items: [ClaudeInputItem] = []
+        if session.activity == .needsInput {
+            let prompts = isQuestionWait(session.waitingFor) ? (transcript?.native ?? []) : []
+            if prompts.isEmpty {
+                items.append(ClaudeInputItem(kind: .native, text: session.waitingFor, date: waitingSince))
+            } else {
+                items.append(contentsOf: prompts.map {
+                    ClaudeInputItem(kind: .native, text: $0.text, date: $0.date ?? waitingSince)
+                })
+            }
+        } else if session.activity != .working, !(matchesDesktop && stored?.turnWasCutShort == true) {
+            items.append(contentsOf: (transcript?.replies ?? []).map {
+                ClaudeInputItem(kind: .reply, text: $0.text, date: $0.date)
+            })
+        }
+        if stored == nil || matchesDesktop, let drafts = reading.drafts[session.id] {
+            // A conversation can have drafts in more than one composer surface.
+            // Show one label as long as at least one draft qualifies.
+            let qualifying = drafts.map { ClaudeInputItem(kind: .draft, text: nil, date: $0) }.filter { $0.isRecent(at: now) }
+            if let latest = qualifying.compactMap(\.date).max() {
+                items.append(ClaudeInputItem(kind: .draft, text: nil, date: latest))
+            } else if let unknown = qualifying.first {
+                items.append(unknown)
+            }
+        }
+        return items.filter { $0.isRecent(at: now) }
+    }
+
+    private static func isQuestionWait(_ reason: String?) -> Bool {
+        guard let reason = reason?.lowercased() else { return true }
+        // Claude Desktop reports AskUserQuestion as "input needed" and
+        // other tool approvals as "permission prompt". An unmatched older
+        // questionnaire cannot describe a new permission wait.
+        return reason == "input needed" || reason == "input required" || reason.contains("question")
     }
 
     private static func workerListed(by agent: ClaudeSessionRecord?, in processes: [Int32: ClaudeObservedProcess]) -> ProcessIdentity? {
@@ -252,17 +326,17 @@ struct ClaudeReconciler {
     }
 
     private static func isVisibleWithoutJobs(_ session: ClaudeConversation) -> Bool {
-        session.activity == .needsInput || session.detached && (session.worker != nil || session.activity == .working)
+        !session.inputItems.isEmpty || session.detached && (session.worker != nil || session.activity == .working)
     }
 
     private static func precedes(_ left: ClaudeConversation, _ right: ClaudeConversation) -> Bool {
         func order(_ item: ClaudeConversation) -> Int {
             if item.id == .unknown { return 3 }
             if item.activity == .closed { return 2 }
-            return item.activity == .needsInput ? 0 : 1
+            return item.inputItems.isEmpty ? 1 : 0
         }
         if order(left) != order(right) { return order(left) < order(right) }
-        if left.activity == .needsInput && right.activity == .needsInput {
+        if !left.inputItems.isEmpty && !right.inputItems.isEmpty {
             switch (left.createdAt, right.createdAt) {
             case let (leftDate?, rightDate?) where leftDate != rightDate: return leftDate < rightDate
             case (.some, .none): return true
