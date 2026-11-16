@@ -11,6 +11,8 @@ struct ClaudeReconciler {
         var owner: ClaudeConversationID
         var confirmedOwner: ClaudeConversationID?
         var output: ClaudeTaskOutput?
+        var backgrounded: Bool
+        var title: String?
 
         var jobID: ClaudeJob.ID { output.map(ClaudeJob.ID.shell) ?? .process(process.id) }
     }
@@ -21,13 +23,18 @@ struct ClaudeReconciler {
 
     mutating func update(_ frame: ClaudeDiscoveryFrame) -> ClaudeSnapshot {
         let processes = Dictionary(frame.processes.value.map { ($0.identity.pid, $0) }, uniquingKeysWith: { first, _ in first })
-        let (sessions, roots) = Self.sessions(in: frame, processes: processes)
+        let (discovered, roots) = Self.sessions(in: frame, processes: processes)
+        let sessions = discovered.mapValues { session in
+            var result = session
+            result.createdAt = session.createdAt ?? known[session.id]?.createdAt
+            return result
+        }
         active = sessions
 
         let metadata = known.merging(sessions) { _, fresh in fresh }
         let sessionReadsComplete = frame.inventory.quality == .complete && frame.registrations.quality == .complete
         if frame.processes.quality != .unavailable {
-            work = attributedWork(in: processes, roots: roots, metadata: metadata, receipts: frame.taskRecords.value,
+            work = attributedWork(in: processes, roots: roots, metadata: metadata, taskRecords: frame.taskRecords.value,
                                   sessions: sessions, sessionReadsComplete: sessionReadsComplete,
                                   restrictToKnownConversations: frame.restrictToKnownConversations)
         }
@@ -58,8 +65,15 @@ struct ClaudeReconciler {
                 conversation.waitingFor = nil
             }
             conversation.jobs = Dictionary(grouping: members, by: \.jobID).map { id, processes in
-                ClaudeJob(id: id, processes: processes.map(\.process).sorted { $0.id.pid < $1.id.pid })
+                let titles = Set(processes.compactMap(\.title))
+                let workers = processes.map(\.process).sorted { $0.id.pid < $1.id.pid }
+                let processTitle: String? = if case .process = id { workers.first?.name } else { nil }
+                return ClaudeJob(id: id, title: titles.count == 1 ? titles.first : processTitle,
+                                processes: workers)
             }.sorted { ($0.processes.first?.id.pid ?? 0) < ($1.processes.first?.id.pid ?? 0) }
+            if frame.processes.quality == .unavailable {
+                for index in conversation.jobs.indices { conversation.jobs[index].processes = [] }
+            }
             visible[id] = conversation
         }
 
@@ -118,12 +132,16 @@ struct ClaudeReconciler {
             if worker == nil, agents.count == 1, let pid = agent?.pid, pidClaims[pid] == [id], roots[pid] == nil {
                 worker = workerListed(by: agent, in: processes)
             }
+            let desktopActivity = record?.entrypoint == "claude-desktop" ? record?.activity : nil
+            let activity = desktopActivity.flatMap { $0 == .unknown ? nil : $0 } ??
+                agent?.activity ?? record?.activity ?? .unknown
             var session = ClaudeConversation(
                 id: id, title: display(agent?.name) ?? display(record?.name) ?? "Claude session",
-                path: display(agent?.cwd) ?? display(record?.cwd), activity: agent?.activity ?? record?.activity ?? .unknown,
+                path: display(agent?.cwd) ?? display(record?.cwd), activity: activity,
                 waitingFor: display(agent?.waitingFor) ?? display(record?.waitingFor), detached: detached,
                 worker: worker
             )
+            session.createdAt = session.sessionID.flatMap { frame.creationDates[$0] }
             if detached {
                 // An attach ID is independent of both the UUID and the worker PID.
                 if attachIDs.count == 1, let attach = attachIDs.first, aliases[attach, default: []].count <= 1 {
@@ -146,17 +164,19 @@ struct ClaudeReconciler {
     }
 
     private func attributedWork(in processes: [Int32: ClaudeObservedProcess], roots: [Int32: Set<ClaudeConversationID>],
-                                metadata: [ClaudeConversationID: ClaudeConversation], receipts: [ClaudeTaskOutput: TimeInterval],
+                                metadata: [ClaudeConversationID: ClaudeConversation],
+                                taskRecords: [ClaudeTaskOutput: ClaudeTaskRecord],
                                 sessions: [ClaudeConversationID: ClaudeConversation], sessionReadsComplete: Bool,
                                 restrictToKnownConversations: Bool) -> [ProcessIdentity: Work] {
-        // Foreground Bash also opens a .output file. Require the structured
-        // background receipt and a matching live writer, or an unchanged writer
-        // from a previous refresh whose receipt has since rolled out of the tail.
-        var liveOutputs: Set<ClaudeTaskOutput> = []
+        // Preserve receipt-backed work beyond the transcript window for the
+        // same live PID and start time. These receipts can also prove CLI work.
+        var backgroundOutputs: Set<ClaudeTaskOutput> = []
         for process in processes.values where roots[process.identity.pid] == nil {
             for output in process.outputs {
-                if work[process.identity]?.output == output || receipts[output].map({ $0 + 1 >= process.startedAt }) == true {
-                    liveOutputs.insert(output)
+                let prior = work[process.identity]
+                let hasReceipt = taskRecords[output]?.backgroundedAt.map { $0 + 1 >= process.startedAt } == true
+                if (prior?.output == output && prior?.backgrounded == true) || hasReceipt {
+                    backgroundOutputs.insert(output)
                 }
             }
         }
@@ -164,17 +184,37 @@ struct ClaudeReconciler {
         var result: [ProcessIdentity: Work] = [:]
         for process in processes.values where roots[process.identity.pid] == nil {
             let prior = work[process.identity]
-            let initial = process.outputs.intersection(liveOutputs)
-            var outputs = initial
+            var writer: ClaudeObservedProcess? = process.outputs.isEmpty ? nil : process
             var ownerRoots: Set<ClaudeConversationID> = []
+            var root: ProcessIdentity?
+            var markers = Set([process.sessionMarker].compactMap { $0 })
             var child = process
             while let parent = processes[child.parent], parent.identity.startedAt < child.identity.startedAt {
                 if let owners = roots[parent.identity.pid] {
                     ownerRoots = owners
+                    root = parent.identity
                     break
                 }
-                if outputs.isEmpty { outputs = parent.outputs.intersection(liveOutputs) }
+                if writer == nil, !parent.outputs.isEmpty { writer = parent }
+                if let marker = parent.sessionMarker { markers.insert(marker) }
                 child = parent
+            }
+
+            var outputs = writer?.outputs.intersection(backgroundOutputs) ?? []
+            let backgrounded = !outputs.isEmpty
+            // A Desktop shell may be shown in Claude without a background
+            // receipt. Qualify its writer in this ancestry chain only.
+            if outputs.isEmpty, let writer, writer.outputs.count == 1, let candidate = writer.outputs.first,
+               candidate.isLocalShell, markers.isSubset(of: [candidate.sessionID]) {
+                let owner = ClaudeConversationID.session(candidate.sessionID)
+                let previousWriter = work[writer.identity]
+                let retained = ownerRoots.isEmpty && previousWriter?.output == candidate && previousWriter?.confirmedOwner == owner
+                if ownerRoots == [owner], let root, let session = sessions[owner], session.worker == root,
+                   case .desktop = session.location {
+                    outputs.insert(candidate)
+                } else if retained {
+                    outputs.insert(candidate)
+                }
             }
 
             let orphan = ownerRoots.isEmpty
@@ -193,9 +233,15 @@ struct ClaudeReconciler {
             if let prior = prior?.confirmedOwner { claims.insert(prior) }
             let resolved = claims.count == 1 ? claims.first.flatMap { metadata[$0]?.id } : nil
             let output = outputs.count == 1 ? outputs.first : nil
+            let title = output.flatMap { output in
+                let record = taskRecords[output]
+                let freshTitle = backgrounded || record?.backgroundedAt == nil ? record?.title : nil
+                return freshTitle ?? (prior?.output == output ? prior?.title : nil)
+            } ?? (mayOutliveTask && output == nil ? prior?.title : nil)
             result[process.identity] = Work(process: ClaudeJobProcess(id: process.identity, name: process.name),
                                             parent: process.parent, owner: resolved ?? .unknown,
-                                            confirmedOwner: prior?.confirmedOwner ?? resolved, output: output)
+                                            confirmedOwner: prior?.confirmedOwner ?? resolved, output: output,
+                                            backgrounded: backgrounded, title: title)
         }
         return result
     }
@@ -216,6 +262,14 @@ struct ClaudeReconciler {
             return item.activity == .needsInput ? 0 : 1
         }
         if order(left) != order(right) { return order(left) < order(right) }
+        if left.activity == .needsInput && right.activity == .needsInput {
+            switch (left.createdAt, right.createdAt) {
+            case let (leftDate?, rightDate?) where leftDate != rightDate: return leftDate < rightDate
+            case (.some, .none): return true
+            case (.none, .some): return false
+            default: break
+            }
+        }
         if left.title != right.title { return left.title.localizedStandardCompare(right.title) == .orderedAscending }
         return String(describing: left.id) < String(describing: right.id)
     }

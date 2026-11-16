@@ -75,9 +75,10 @@ struct ClaudeDiscovery: Sendable {
 
         let outputs = Set(processes.value.flatMap(\.outputs))
         let registrations = registrationsByConfig.flatMap(\.registrations)
+        let launches = readShellLaunches(from: processes.value, registrations: registrations)
         let registeredElsewhere = Set(registrationsByConfig.filter { $0.config != installation.configDirectory }
             .flatMap(\.registrations).compactMap(\.record.sessionID))
-        var taskRecords = ClaudeRead<[ClaudeTaskOutput: TimeInterval]>(value: [:])
+        var taskRecords = ClaudeRead<[ClaudeTaskOutput: ClaudeTaskRecord]>(value: [:])
         for source in registrationsByConfig {
             var sessions = Set(source.registrations.compactMap(\.record.sessionID))
             let broadRead = !selectedCLIOnly && source.config == installation.configDirectory
@@ -89,12 +90,45 @@ struct ClaudeDiscovery: Sendable {
             let matchingOutputs = outputs.filter { output in
                 broadRead ? !registeredElsewhere.contains(output.sessionID) : sessions.contains(output.sessionID)
             }
-            let read = ClaudeTaskRecords.read(matchingOutputs, in: source.config, sessions: sessions)
-            taskRecords.value.merge(read.value, uniquingKeysWith: max)
+            let read = ClaudeTaskRecords.read(matchingOutputs, in: source.config, sessions: sessions, launches: launches)
+            taskRecords.value.merge(read.value, uniquingKeysWith: ClaudeTaskRecords.merge)
             if read.quality != .complete { taskRecords.quality = .partial }
         }
+
+        let registered = registrations.map(\.record)
+        let waiting = Set((inventory.value + registered).filter { $0.activity == .needsInput }.compactMap(\.sessionID))
+        let desktop = registered.filter { $0.entrypoint == "claude-desktop" }
+        let desktopWaiting = desktop.filter { $0.sessionID.map(waiting.contains) ?? false }
+        var dates = ClaudeSessionDates.cliDates(for: waiting.subtracting(desktop.compactMap(\.sessionID)), configs: configs)
+        dates.merge(ClaudeSessionDates.desktopDates(for: desktopWaiting, home: installation.home)) { _, desktopDate in
+            desktopDate
+        }
         return ClaudeDiscoveryFrame(inventory: inventory, registrations: .init(value: registrations, quality: registrationQuality),
-                                    processes: processes, taskRecords: taskRecords, restrictToKnownConversations: selectedCLIOnly)
+                                    processes: processes, taskRecords: taskRecords, creationDates: dates,
+                                    restrictToKnownConversations: selectedCLIOnly)
+    }
+
+    private func readShellLaunches(from processes: [ClaudeObservedProcess], registrations: [ClaudeRegistration])
+        -> [ClaudeTaskOutput: ClaudeShellLaunch] {
+        let desktop = Dictionary(grouping: registrations.filter { $0.record.entrypoint == "claude-desktop" },
+                                 by: \.worker.pid)
+        let identities = Dictionary(uniqueKeysWithValues: processes.map { ($0.identity.pid, $0.identity) })
+        var launches: [ClaudeTaskOutput: ClaudeShellLaunch] = [:]
+        var ambiguous: Set<ClaudeTaskOutput> = []
+        for process in processes {
+            // Read the launching shell only. Descendants may inherit the same
+            // descriptors, but their arguments do not identify the tool call.
+            guard process.outputs.count == 1, let output = process.outputs.first, output.isLocalShell,
+                  process.sessionMarker == nil || process.sessionMarker == output.sessionID,
+                  let roots = desktop[process.parent], roots.count == 1, let root = roots.first,
+                  root.record.sessionID == output.sessionID, identities[process.parent] == root.worker,
+                  root.worker.startedAt < process.identity.startedAt,
+                  let arguments = transport.arguments(of: process.identity.pid),
+                  liveInfo(process.identity) != nil,
+                  let launch = ClaudeShellLaunch(arguments: arguments, startedAt: process.startedAt) else { continue }
+            if launches.updateValue(launch, forKey: output) != nil { ambiguous.insert(output) }
+        }
+        return launches.filter { !ambiguous.contains($0.key) }
     }
 
     func readInventory(_ installation: ClaudeInstallation) -> ClaudeRead<[ClaudeSessionRecord]> {
@@ -259,8 +293,10 @@ struct ClaudeDiscovery: Sendable {
                 if errno == EPERM || errno == EACCES { result.quality = .partial }
                 continue
             }
+            // libproc reports XNU's file flags. FREAD also has a bit set,
+            // so testing against open(2)'s O_RDONLY accepts read-only FDs.
             guard info.pvip.vip_vi.vi_stat.vst_mode & UInt16(S_IFMT) == UInt16(S_IFREG),
-                  info.pfi.fi_openflags & UInt32(O_ACCMODE) != UInt32(O_RDONLY) else { continue }
+                  info.pfi.fi_openflags & UInt32(FWRITE) != 0 else { continue }
             let path = withUnsafeBytes(of: info.pvip.vip_path) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
             if let output = ClaudeTaskOutput(path: path, roots: roots) { result.value.insert(output) }
         }

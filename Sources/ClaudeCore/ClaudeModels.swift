@@ -95,6 +95,7 @@ struct ClaudeConversation: Equatable, Identifiable, Sendable {
     var detached = false
     var worker: ProcessIdentity?
     var location: ClaudeSessionLocation?
+    var createdAt: Date?
     var jobs: [ClaudeJob] = []
 
     var sessionID: UUID? {
@@ -110,7 +111,13 @@ struct ClaudeJob: Equatable, Identifiable, Sendable {
     }
 
     let id: ID
+    var title: String? = nil
     var processes: [ClaudeJobProcess]
+
+    var isShell: Bool {
+        if case .shell = id { return true }
+        return false
+    }
 }
 
 struct ClaudeJobProcess: Equatable, Identifiable, Sendable {
@@ -133,10 +140,6 @@ struct ClaudeSnapshot: Equatable, Sendable {
     var registrations: ClaudeReadQuality = .complete
     var processes: ClaudeReadQuality = .complete
     var taskRecords: ClaudeReadQuality = .complete
-
-    var incomplete: Bool {
-        [inventory, registrations, processes, taskRecords].contains { $0 != .complete }
-    }
 }
 
 struct ClaudeRegistration: Sendable {
@@ -156,6 +159,13 @@ struct ClaudeTaskOutput: Hashable, Sendable {
         self.taskID = taskID
     }
 
+    // Claude Code allocates these IDs for local shell tasks in both modes.
+    // A descriptor with this ID does not say whether the task was backgrounded.
+    var isLocalShell: Bool {
+        taskID.utf8.count == 9 && taskID.utf8.first == 98 &&
+            taskID.utf8.dropFirst().allSatisfy { (48...57).contains($0) || (97...122).contains($0) }
+    }
+
     init?(path: String, roots: Set<String>) {
         let file = URL(fileURLWithPath: path)
         let taskFolder = file.deletingLastPathComponent()
@@ -171,6 +181,11 @@ struct ClaudeTaskOutput: Hashable, Sendable {
     }
 }
 
+struct ClaudeTaskRecord: Sendable, Equatable {
+    var backgroundedAt: TimeInterval? = nil
+    var title: String? = nil
+}
+
 struct ClaudeObservedProcess: Sendable {
     let identity: ProcessIdentity
     let parent: Int32
@@ -184,7 +199,7 @@ struct ClaudeDiscoveryFrame: Sendable {
     var inventory: ClaudeRead<[ClaudeSessionRecord]> = .init(value: [])
     var registrations: ClaudeRead<[ClaudeRegistration]> = .init(value: [])
     var processes: ClaudeRead<[ClaudeObservedProcess]> = .init(value: [])
-    // Unix seconds when Claude confirmed that each shell task went to the background.
-    var taskRecords: ClaudeRead<[ClaudeTaskOutput: TimeInterval]> = .init(value: [:])
+    var taskRecords: ClaudeRead<[ClaudeTaskOutput: ClaudeTaskRecord]> = .init(value: [:])
+    var creationDates: [UUID: Date] = [:]
     var restrictToKnownConversations = false
 }

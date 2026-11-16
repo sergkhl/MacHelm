@@ -18,7 +18,7 @@ final class ClaudeDiscoveryTests: XCTestCase {
         frame.registrations.value = [alpha.0, beta.0]
         frame.processes.value = [alpha.1, beta.1, process(201, parent: 200, started: 6, outputs: [shellA]),
                                  process(202, parent: 201, started: 7), process(301, parent: 300, started: 11, outputs: [shellB])]
-        frame.taskRecords.value = [shellA: 7, shellB: 12]
+        frame.taskRecords.value = [shellA: .init(backgroundedAt: 7), shellB: .init(backgroundedAt: 12)]
         var discovery = ClaudeReconciler()
         let conversations = discovery.update(frame).conversations
         XCTAssertEqual(conversations.map(\.title), ["First", "Second"])
@@ -92,7 +92,7 @@ final class ClaudeDiscoveryTests: XCTestCase {
         frame.registrations.value = ClaudeDiscovery.registrationsInScope(registrations, cliInventory: [selected], desktopOnly: false)
         frame.processes.value = [desktop.1, work, other, process(201, parent: 200, started: 6, outputs: [shell]),
                                  process(401, parent: 1, started: 22, marker: UUID())]
-        frame.taskRecords.value = [shell: 7]
+        frame.taskRecords.value = [shell: .init(backgroundedAt: 7)]
         var discovery = ClaudeReconciler()
         let snapshot = discovery.update(frame)
         XCTAssertEqual(snapshot.conversations.map(\.title), ["Work", "Desktop"])
@@ -110,7 +110,7 @@ final class ClaudeDiscoveryTests: XCTestCase {
         var frame = ClaudeDiscoveryFrame()
         frame.registrations.value = [alpha.0]
         frame.processes.value = [alpha.1, original]
-        frame.taskRecords.value = [shell: 6]
+        frame.taskRecords.value = [shell: .init(backgroundedAt: 6)]
         var discovery = ClaudeReconciler()
         XCTAssertEqual(discovery.update(frame).conversations.first?.jobs.count, 1)
 
@@ -126,7 +126,7 @@ final class ClaudeDiscoveryTests: XCTestCase {
         var frame = ClaudeDiscoveryFrame()
         frame.registrations.value = [alpha.0]
         frame.processes.value = [alpha.1, process(203, parent: 200, started: 7, outputs: [shell])]
-        frame.taskRecords.value = [shell: 7]
+        frame.taskRecords.value = [shell: .init(backgroundedAt: 7)]
         var discovery = ClaudeReconciler()
         _ = discovery.update(frame)
 
@@ -151,23 +151,73 @@ final class ClaudeDiscoveryTests: XCTestCase {
         frame.registrations.value = [alpha.0, beta.0]
         frame.processes.value = [alpha.1, beta.1, process(201, parent: 200, started: 6, marker: second, outputs: [shell]),
                                  process(401, parent: 1, started: 22, marker: UUID())]
-        frame.taskRecords.value = [shell: 7]
+        frame.taskRecords.value = [shell: .init(backgroundedAt: 7)]
         var discovery = ClaudeReconciler()
         let snapshot = discovery.update(frame)
         XCTAssertEqual(snapshot.conversations.map(\.id), [.unknown])
         XCTAssertEqual(snapshot.conversations.first?.jobs.flatMap(\.processes).map(\.id.pid), [201, 401])
     }
 
-    func testForegroundWritersAndHistoricalReceiptsAloneAreNotJobs() {
+    func testCLIForegroundWritersAndHistoricalReceiptsAloneAreNotJobs() {
         let live = output(first, "b1ev9qfoo")
         let historical = output(first, "b7607rzh4")
         let alpha = root(first, pid: 200, started: 5, title: "First")
+        var cli = alpha.0.record
+        cli.entrypoint = "cli"
         var frame = ClaudeDiscoveryFrame()
-        frame.registrations.value = [alpha.0]
+        frame.registrations.value = [ClaudeRegistration(record: cli, worker: alpha.0.worker, terminal: nil)]
         frame.processes.value = [alpha.1, process(201, parent: 200, started: 6, marker: first, outputs: [live])]
-        frame.taskRecords.value = [historical: 6]
+        frame.taskRecords.value = [historical: .init(backgroundedAt: 6)]
         var discovery = ClaudeReconciler()
         XCTAssertTrue(discovery.update(frame).conversations.isEmpty)
+    }
+
+    func testDesktopShellWorkWithoutReceiptKeepsRedirectedWorkersAndExactOwner() throws {
+        let shell = output(first, "bk3kbojt2")
+        let secondShell = output(second, "b055a1l6o")
+        let agent = output(first, "a055a1l6o")
+        let alpha = root(first, pid: 200, started: 5, title: "First")
+        let beta = root(second, pid: 300, started: 6, title: "Second")
+        var frame = ClaudeDiscoveryFrame()
+        frame.registrations.value = [alpha.0, beta.0]
+        frame.processes.value = [alpha.1, beta.1, process(201, parent: 200, started: 7, outputs: [shell]),
+                                 process(202, parent: 201, started: 8, marker: first),
+                                 process(203, parent: 201, started: 9, marker: second),
+                                 process(205, parent: 200, started: 10, outputs: [agent]),
+                                 process(301, parent: 300, started: 11, outputs: [shell]),
+                                 process(302, parent: 300, started: 12, outputs: [secondShell])]
+        var discovery = ClaudeReconciler()
+        let firstReading = discovery.update(frame).conversations
+        XCTAssertEqual(firstReading.map(\.sessionID), [first, second])
+        let job = try XCTUnwrap(firstReading.first?.jobs.first)
+        XCTAssertEqual(job.id, .shell(shell))
+        XCTAssertNil(job.title)
+        XCTAssertEqual(job.processes.map(\.id.pid), [201, 202])
+        XCTAssertEqual(firstReading.last?.jobs.first?.processes.map(\.id.pid), [302])
+        frame.taskRecords.value = [shell: .init(title: "Render the current model")]
+        XCTAssertEqual(discovery.update(frame).conversations.first?.jobs.first?.title, "Render the current model")
+
+        frame.processes.value.removeAll { [201, 202, 203].contains($0.identity.pid) }
+        XCTAssertEqual(discovery.update(frame).conversations.map(\.sessionID), [second])
+        frame.processes.value.removeAll { $0.identity.pid == 302 }
+        XCTAssertTrue(discovery.update(frame).conversations.isEmpty)
+    }
+
+    func testExplicitWaitingSessionsSortByCreationDateWithoutRequiringAPID() {
+        let unknownDate = UUID()
+        let idle = UUID()
+        var frame = ClaudeDiscoveryFrame()
+        frame.inventory.value = [
+            .init(sessionId: first.uuidString, startedAt: 3_000, status: "waiting", name: "Zebra"),
+            .init(id: "14bc06df", sessionId: second.uuidString, startedAt: 2_000, kind: "background", state: "blocked", name: "Mika"),
+            .init(sessionId: unknownDate.uuidString, status: "waiting", name: "Alpha"),
+            .init(sessionId: idle.uuidString, status: "idle", waitingFor: "awaiting your yes", name: "Vera")
+        ]
+        frame.creationDates = [first: Date(timeIntervalSince1970: 1), second: Date(timeIntervalSince1970: 2)]
+        var discovery = ClaudeReconciler()
+        XCTAssertEqual(discovery.update(frame).conversations.map(\.sessionID), [first, second, unknownDate])
+        frame.creationDates = [:]
+        XCTAssertEqual(discovery.update(frame).conversations.map(\.sessionID), [first, second, unknownDate])
     }
 
     func testPartialInventoryStillShowsVerifiedWorkAndFailedProcessReadKeepsItStale() {
@@ -180,7 +230,7 @@ final class ClaudeDiscoveryTests: XCTestCase {
         frame.inventory = ClaudeDiscovery.decodeInventory(Data(partial.utf8))
         frame.registrations.value = [alpha.0]
         frame.processes.value = [alpha.1, process(203, parent: 200, started: 7, outputs: [shell])]
-        frame.taskRecords.value = [shell: 7]
+        frame.taskRecords.value = [shell: .init(backgroundedAt: 7, title: "Compare output")]
         var discovery = ClaudeReconciler()
         let available = discovery.update(frame)
         XCTAssertEqual(available.inventory, .partial)
@@ -192,6 +242,8 @@ final class ClaudeDiscoveryTests: XCTestCase {
         XCTAssertEqual(stale.processes, .unavailable)
         XCTAssertEqual(stale.conversations.map(\.title), ["Needs me", "First"])
         XCTAssertTrue(stale.conversations.allSatisfy { $0.location == nil })
+        XCTAssertEqual(stale.conversations.last?.jobs.first?.title, "Compare output")
+        XCTAssertEqual(stale.conversations.last?.jobs.first?.processes, [])
         XCTAssertEqual(discovery.update(ClaudeDiscoveryFrame()), ClaudeSnapshot())
     }
 
@@ -202,8 +254,45 @@ final class ClaudeDiscoveryTests: XCTestCase {
         {"type":"user","sessionId":"\(first)","timestamp":"2026-11-16T03:10:00.000Z","toolUseResult":{"agentId":"b055a1l6o"}}
         {"type":"user","sessionId":"\(first)","timestamp":"2026-11-16T03:20:00.000Z","toolUseResult":{"backgroundTaskId":"b055a1l6o"}}
         """
-        let receipts = ClaudeTaskRecords.receipts(in: Data(transcript.utf8), for: [shell])
-        XCTAssertEqual(receipts, [shell: 1_794_799_200])
+        let records = ClaudeTaskRecords.records(in: Data(transcript.utf8), for: [shell])
+        XCTAssertEqual(records, [shell: .init(backgroundedAt: 1_794_799_200)])
+    }
+
+    func testLongRunningJobLooksPastTheOldTailAndLinksTheExactDescription() throws {
+        let shell = output(first, "bi3z9n1pt")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let project = directory.appendingPathComponent("projects/\(shell.projectKey)")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let transcript = """
+        {"type":"assistant","sessionId":"\(first)","timestamp":"2026-11-16T03:19:59.000Z","message":{"content":[{"type":"tool_use","name":"Bash","id":"other","input":{"description":"Render the other frames"}},{"type":"tool_use","name":"Bash","id":"match","input":{"description":"Render the tracked frames"}}]}}
+        {"type":"user","sessionId":"\(first)","timestamp":"2026-11-16T03:20:00.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"match"}]},"toolUseResult":{"backgroundTaskId":"\(shell.taskID)"}}
+        """
+        let later = String(repeating: "{\"type\":\"progress\"}\n", count: 70_000)
+        let file = project.appendingPathComponent(first.uuidString.lowercased() + ".jsonl")
+        try Data((transcript + "\n" + later).utf8).write(to: file)
+        let read = ClaudeTaskRecords.read([shell], in: directory, sessions: [first], launches: [:])
+        XCTAssertEqual(read.value, [shell: .init(backgroundedAt: 1_794_799_200, title: "Render the tracked frames")])
+    }
+
+    func testReceiptLessTitleRequiresOneMatchingToolCallAtLaunch() throws {
+        let shell = output(first, "bk3kbojt2")
+        let script = "source /tmp/.claude/shell-snapshots/zsh.sh && eval 'printf '\\''%s'\\'' hello' < /dev/null && pwd -P >| /tmp/cwd"
+        let launch = try XCTUnwrap(ClaudeShellLaunch(arguments: ["/bin/zsh", "-c", script], startedAt: 1_794_799_200))
+        let transcript = """
+        {"type":"assistant","sessionId":"\(first)","timestamp":"2026-11-16T03:19:56.000Z","message":{"content":[{"type":"tool_use","name":"Bash","id":"done","input":{"command":"printf '%s' hello","description":"Completed call"}}]}}
+        {"type":"user","sessionId":"\(first)","timestamp":"2026-11-16T03:19:57.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"done"}]},"toolUseResult":{"exitCode":0}}
+        {"type":"assistant","sessionId":"\(first)","timestamp":"2026-11-16T03:19:59.000Z","message":{"content":[{"type":"tool_use","name":"Bash","id":"live","input":{"command":"printf '%s' hello","description":"Live call"}},{"type":"tool_use","name":"Bash","id":"prefix","input":{"command":"printf '%s'","description":"Partial command"}}]}}
+        """
+        let records = ClaudeTaskRecords.records(in: Data(transcript.utf8), for: [shell], launches: [shell: launch])
+        XCTAssertEqual(records, [shell: .init(title: "Live call")])
+
+        let duplicate = """
+        {"type":"assistant","sessionId":"\(first)","timestamp":"2026-11-16T03:19:59.500Z","message":{"content":[{"type":"tool_use","name":"Bash","id":"another","input":{"command":"printf '%s' hello","description":"Other call"}}]}}
+        """
+        let ambiguous = ClaudeTaskRecords.records(in: Data((transcript + "\n" + duplicate).utf8),
+                                                  for: [shell], launches: [shell: launch])
+        XCTAssertTrue(ambiguous.isEmpty)
     }
 
     func testInvalidActionIdentifiersAndForeignOutputPathsAreRejected() {
